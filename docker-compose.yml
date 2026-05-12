@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  tqm:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data:ro
+      - ./output:/app/output
+      - ./config:/app/config:ro
+    profiles: ["manual"]
+
+  # Monthly cron job — runs the report pipeline on a schedule
+  tqm-cron:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data:ro
+      - ./output:/app/output
+      - ./config:/app/config:ro
+    entrypoint: >
+      sh -c "while true; do
+        tqm run /app/config/client.yaml;
+        sleep 2592000;
+      done"
+    restart: unless-stopped

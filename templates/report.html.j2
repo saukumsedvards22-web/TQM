@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ client_name }} — {{ period }} Management Report</title>
+  <style>
+    :root {
+      --brand:  #1A3C6B;
+      --accent: #E8A020;
+      --light:  #F5F7FA;
+      --border: #D1D9E6;
+      --up:     #1A7A3F;
+      --down:   #B91C1C;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 13px;
+      color: #1E2533;
+      background: #fff;
+      line-height: 1.6;
+    }
+    /* ── Header ── */
+    .header {
+      background: var(--brand);
+      color: #fff;
+      padding: 32px 48px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .header h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.02em; }
+    .header .meta { font-size: 11px; opacity: 0.75; text-align: right; }
+    .header .period-badge {
+      background: var(--accent);
+      color: #fff;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      margin-top: 6px;
+      display: inline-block;
+    }
+    /* ── Headline ── */
+    .headline-bar {
+      background: var(--accent);
+      color: #fff;
+      padding: 14px 48px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    /* ── Body ── */
+    .body { padding: 36px 48px; }
+    /* ── KPI Cards ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 36px;
+    }
+    .kpi-card {
+      background: var(--light);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .kpi-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #6B7280; }
+    .kpi-card .value { font-size: 20px; font-weight: 700; margin: 4px 0; }
+    .kpi-card .delta { font-size: 11px; font-weight: 600; }
+    .kpi-card .delta.up   { color: var(--up); }
+    .kpi-card .delta.down { color: var(--down); }
+    .kpi-card .delta.flat { color: #6B7280; }
+    /* ── Sections ── */
+    .section { margin-bottom: 28px; }
+    .section h2 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--brand);
+      border-bottom: 2px solid var(--brand);
+      padding-bottom: 4px;
+      margin-bottom: 12px;
+    }
+    .section p { margin-bottom: 8px; }
+    ul.findings { list-style: none; padding: 0; }
+    ul.findings li {
+      padding: 6px 10px 6px 22px;
+      border-left: 3px solid var(--accent);
+      margin-bottom: 6px;
+      background: var(--light);
+      border-radius: 0 4px 4px 0;
+      position: relative;
+    }
+    ul.findings li::before { content: "→"; position: absolute; left: 6px; color: var(--accent); }
+    /* ── Action Table ── */
+    table.actions {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    table.actions th {
+      background: var(--brand);
+      color: #fff;
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 600;
+    }
+    table.actions td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    table.actions tr:nth-child(even) td { background: var(--light); }
+    /* ── Two-col ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    ul.simple { list-style: disc; padding-left: 18px; }
+    ul.simple li { margin-bottom: 4px; }
+    /* ── Footer ── */
+    .footer {
+      background: var(--light);
+      border-top: 1px solid var(--border);
+      padding: 16px 48px;
+      font-size: 10px;
+      color: #9CA3AF;
+      display: flex;
+      justify-content: space-between;
+    }
+    /* ── Outlook ── */
+    .outlook-box {
+      background: var(--brand);
+      color: #fff;
+      border-radius: 8px;
+      padding: 16px 20px;
+      font-style: italic;
+    }
+    /* ── Print ── */
+    @media print {
+      .header, .headline-bar { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { font-size: 11px; }
+      .header { padding: 20px 32px; }
+      .body { padding: 24px 32px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div>
+    <div style="font-size:11px;opacity:0.6;margin-bottom:4px">MANAGEMENT REPORT</div>
+    <h1>{{ client_name }}</h1>
+  </div>
+  <div class="meta">
+    Prepared by TQM Analytics<br>
+    Generated: {{ generated_date }}<br>
+    <span class="period-badge">{{ period }}</span>
+  </div>
+</div>
+
+<!-- Headline -->
+<div class="headline-bar">{{ commentary.headline }}</div>
+
+<!-- Body -->
+<div class="body">
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid">
+    {% for kpi in kpis %}
+    <div class="kpi-card">
+      <div class="label">{{ kpi.label }}</div>
+      <div class="value">{{ kpi.value_fmt }}</div>
+      {% if kpi.pct is not none %}
+      <div class="delta {{ kpi.direction }}">
+        {{ "▲" if kpi.direction == "up" else ("▼" if kpi.direction == "down" else "–") }}
+        {{ "%.1f"|format(kpi.pct|abs) }}% vs prior month
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Executive Summary -->
+  <div class="section">
+    <h2>Executive Summary</h2>
+    <p>{{ commentary.executive_summary }}</p>
+  </div>
+
+  <!-- Key Findings -->
+  <div class="section">
+    <h2>Key Findings</h2>
+    <ul class="findings">
+      {% for finding in commentary.key_findings %}
+      <li>{{ finding }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <!-- Root Cause -->
+  <div class="section">
+    <h2>Root Cause Analysis</h2>
+    <p>{{ commentary.root_cause_analysis }}</p>
+  </div>
+
+  <!-- Risks & Opportunities -->
+  <div class="two-col">
+    <div class="section">
+      <h2>Risks</h2>
+      <ul class="simple">
+        {% for risk in commentary.risks %}
+        <li>{{ risk }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="section">
+      <h2>Opportunities</h2>
+      <ul class="simple">
+        {% for opp in commentary.opportunities %}
+        <li>{{ opp }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- Recommended Actions -->
+  {% if commentary.recommended_actions %}
+  <div class="section">
+    <h2>Recommended Actions</h2>
+    <table class="actions">
+      <thead>
+        <tr>
+          <th>Action</th>
+          <th>Owner</th>
+          <th>Deadline</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for action in commentary.recommended_actions %}
+        <tr>
+          <td>{{ action.action }}</td>
+          <td>{{ action.owner }}</td>
+          <td>{{ action.deadline }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Outlook -->
+  <div class="section">
+    <h2>Outlook</h2>
+    <div class="outlook-box">{{ commentary.outlook }}</div>
+  </div>
+
+</div><!-- /body -->
+
+<!-- Footer -->
+<div class="footer">
+  <span>{{ client_name }} · {{ period }} · Confidential</span>
+  <span>TQM Analytics · AI-assisted management reporting</span>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,35 @@
+# TQM client configuration template
+# Copy to config/<client_name>.yaml and fill in your values.
+
+client_name: "Acme SIA"
+client_profile: |
+  Latvian wholesale distribution company. Sells industrial supplies to B2B customers
+  across the Baltics. Main KPIs: revenue, gross margin %, order volume, top customers.
+  Seasonality: Q4 is strongest. Compare to same month last year where possible.
+
+# Data files
+current_file: "data/acme/sales_2024_03.csv"
+previous_file: "data/acme/sales_2024_02.csv"
+
+# Output
+output_dir: "output/acme"
+format: "all"   # html | pdf | md | all
+
+# Email delivery
+email_to:
+  - "ceo@acme.lv"
+  - "cfo@acme.lv"
+
+# Power BI (optional — leave empty to skip deployment)
+powerbi:
+  dataset_name: "Acme Sales Dashboard"
+  workspace_id: ""
+  tenant_id: ""
+  client_id: ""
+  # client_secret: set PBI_CLIENT_SECRET env var
+
+# DAX generation
+dax:
+  client_context: |
+    Focus on: Total Revenue, Gross Margin %, Top 10 Customers by Revenue,
+    Sales by Region, MoM and YoY comparisons, Salesperson performance.

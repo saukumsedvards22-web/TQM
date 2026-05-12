@@ -1,0 +1,18 @@
+date,customer_name,product_code,product_category,salesperson,qty,unit_price,discount_pct,region
+2024-02-01,SIA Latvijas Enerģija,PROD-001,Industrial,Jānis Bērziņš,80,45.50,0,Rīga
+2024-02-01,AS Grindeks,PROD-002,Pharmaceutical,Mārtiņš Kalniņš,40,120.00,0,Rīga
+2024-02-02,SIA Maxima Latvija,PROD-003,Retail,Jānis Bērziņš,160,12.99,10,Rīga
+2024-02-03,SIA Latvijas Gāze,PROD-001,Industrial,Ilze Ozola,60,45.50,0,Rīga
+2024-02-05,SIA Rimi Latvia,PROD-003,Retail,Mārtiņš Kalniņš,130,12.99,0,Rīga
+2024-02-06,AS Latvenergo,PROD-004,Industrial,Jānis Bērziņš,250,8.75,0,Rīga
+2024-02-07,SIA Latvijas Pasta,PROD-002,Pharmaceutical,Ilze Ozola,25,120.00,0,Latvija
+2024-02-08,SIA Cēsu Alus,PROD-005,Food & Beverage,Mārtiņš Kalniņš,420,3.20,0,Vidzeme
+2024-02-09,AS Olainfarm,PROD-002,Pharmaceutical,Jānis Bērziņš,70,120.00,5,Rīga
+2024-02-12,SIA ABLV Bank,PROD-006,Finance,Ilze Ozola,8,250.00,0,Rīga
+2024-02-13,SIA Latvijas Finieris,PROD-007,Timber,Mārtiņš Kalniņš,300,5.60,0,Kurzeme
+2024-02-14,SIA Rimi Latvia,PROD-003,Retail,Jānis Bērziņš,190,12.99,0,Rīga
+2024-02-15,AS Latvenergo,PROD-004,Industrial,Ilze Ozola,150,8.75,0,Rīga
+2024-02-19,SIA Latvijas Enerģija,PROD-001,Industrial,Mārtiņš Kalniņš,70,45.50,0,Rīga
+2024-02-20,SIA Cēsu Alus,PROD-005,Food & Beverage,Jānis Bērziņš,480,3.20,0,Vidzeme
+2024-02-21,AS Grindeks,PROD-002,Pharmaceutical,Ilze Ozola,35,120.00,0,Rīga
+2024-02-22,SIA Maxima Latvija,PROD-003,Retail,Mārtiņš Kalniņš,140,12.99,0,Rīga
