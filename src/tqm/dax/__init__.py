@@ -3,10 +3,11 @@
 from .generator import DAXGenerator
 from .measures import DAXMeasure, DAXMeasureSet
 from .validator import DAXValidator, DAXValidationResult
-from .golden_tests import GoldenSuite, GoldenValue, GoldenTestResult
+from .golden_tests import GoldenSuite, GoldenValue, GoldenTestResult, GoldenSignoff, GoldenSuiteUnsignedError
 
 __all__ = [
     "DAXGenerator", "DAXMeasure", "DAXMeasureSet",
     "DAXValidator", "DAXValidationResult",
     "GoldenSuite", "GoldenValue", "GoldenTestResult",
+    "GoldenSignoff", "GoldenSuiteUnsignedError",
 ]

@@ -2,7 +2,7 @@
 
 import pytest
 
-from tqm.ai.analyst import AICommentary, RootCauseAnalysis, RootCauseClaim
+from tqm.ai.analyst import AICommentary, KeyFinding, RootCauseAnalysis, RootCauseClaim
 from tqm.ai.review_gate import ReviewGate, ReviewBlockedError
 from tqm.ai.snapshot import MonthlySnapshot, SnapshotComparison
 
@@ -18,11 +18,15 @@ def _rca(claim: str = "Seasonal demand drove volume.", kpi: str = "total_qty", v
     )
 
 
+def _kf(kpi_id: str = "total_revenue", direction: str = "up", magnitude_pct: float = 5.6, context: str = "") -> KeyFinding:
+    return KeyFinding(kpi_id=kpi_id, direction=direction, magnitude_pct=magnitude_pct, context=context)
+
+
 def _commentary(**kwargs) -> AICommentary:
     defaults = dict(
-        headline="Revenue grew 5%",
-        executive_summary="Revenue increased 5% driven by higher volumes.",
-        key_findings=["Volume up 5%"],
+        headline="Revenue grew 5.6%",
+        executive_summary="Revenue increased 5.6% driven by higher volumes.",
+        key_findings=[_kf()],
         root_cause_analysis=_rca(),
         risks=[],
         opportunities=[],

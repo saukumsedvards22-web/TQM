@@ -74,11 +74,51 @@ class GoldenTestResult:
 
 
 @dataclass
+class GoldenSignoff:
+    """Two-analyst rule: golden values must be seeded AND independently verified.
+
+    A suite without complete signoff cannot be used for production verification.
+    Refusing to run is the only honest behaviour — otherwise the seeder becomes
+    the new single point of failure (acknowledged review hole).
+    """
+    seeded_by: str = ""
+    seeded_at: str = ""
+    verified_by: str = ""        # must differ from seeded_by
+    verified_at: str = ""
+    client_signoff_email: str = ""
+    client_signoff_at: str = ""
+
+    def is_complete(self) -> bool:
+        return bool(
+            self.seeded_by and self.verified_by
+            and self.seeded_by != self.verified_by
+            and self.client_signoff_email
+        )
+
+    def missing(self) -> list[str]:
+        gaps: list[str] = []
+        if not self.seeded_by:
+            gaps.append("seeded_by")
+        if not self.verified_by:
+            gaps.append("verified_by")
+        if self.seeded_by and self.verified_by and self.seeded_by == self.verified_by:
+            gaps.append("verified_by must differ from seeded_by")
+        if not self.client_signoff_email:
+            gaps.append("client_signoff_email")
+        return gaps
+
+
+class GoldenSuiteUnsignedError(RuntimeError):
+    """Raised when compare() is called on a suite without complete signoff."""
+
+
+@dataclass
 class GoldenSuite:
     client_name: str
     dataset_name: str
     reference_period: str
     tests: list[GoldenValue] = field(default_factory=list)
+    signoff: GoldenSignoff = field(default_factory=GoldenSignoff)
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -89,6 +129,14 @@ class GoldenSuite:
             "client_name": self.client_name,
             "dataset_name": self.dataset_name,
             "reference_period": self.reference_period,
+            "signoff": {
+                "seeded_by": self.signoff.seeded_by,
+                "seeded_at": self.signoff.seeded_at,
+                "verified_by": self.signoff.verified_by,
+                "verified_at": self.signoff.verified_at,
+                "client_signoff_email": self.signoff.client_signoff_email,
+                "client_signoff_at": self.signoff.client_signoff_at,
+            },
             "tests": [
                 {
                     "measure_name": t.measure_name,
@@ -108,19 +156,31 @@ class GoldenSuite:
     def load(cls, path: Path) -> "GoldenSuite":
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         tests = [GoldenValue(**t) for t in data.get("tests", [])]
+        signoff_data = data.get("signoff", {}) or {}
         return cls(
             client_name=data["client_name"],
             dataset_name=data["dataset_name"],
             reference_period=data["reference_period"],
             tests=tests,
+            signoff=GoldenSignoff(**signoff_data),
         )
 
     # ------------------------------------------------------------------
     # Comparison
     # ------------------------------------------------------------------
 
-    def compare(self, actuals: dict[str, float | None]) -> list[GoldenTestResult]:
-        """Compare expected values against actuals dict (measure_name -> value)."""
+    def compare(self, actuals: dict[str, float | None], *, allow_unsigned: bool = False) -> list[GoldenTestResult]:
+        """Compare expected values against actuals dict (measure_name -> value).
+
+        Raises GoldenSuiteUnsignedError if the two-analyst signoff is incomplete,
+        unless allow_unsigned=True is passed (for unit tests and CI dry runs only).
+        """
+        if not allow_unsigned and not self.signoff.is_complete():
+            raise GoldenSuiteUnsignedError(
+                f"Golden suite for {self.client_name} is missing signoff: {self.signoff.missing()}. "
+                "Production verification requires two-analyst signoff and client confirmation. "
+                "Pass allow_unsigned=True only for unit tests or CI dry runs."
+            )
         results: list[GoldenTestResult] = []
         for test in self.tests:
             actual = actuals.get(test.measure_name)
@@ -152,8 +212,8 @@ class GoldenSuite:
             ))
         return results
 
-    def report(self, actuals: dict[str, float | None]) -> str:
-        results = self.compare(actuals)
+    def report(self, actuals: dict[str, float | None], *, allow_unsigned: bool = False) -> str:
+        results = self.compare(actuals, allow_unsigned=allow_unsigned)
         passed = sum(1 for r in results if r.passed)
         lines = [
             f"Golden test results — {self.client_name} / {self.reference_period}",
@@ -182,11 +242,16 @@ class GoldenSuite:
         reference_period: str,
         measure_actuals: dict[str, float],
         tolerance_pct: float = TOLERANCE_PCT,
+        seeded_by: str = "",
     ) -> "GoldenSuite":
         """Create a golden suite from a trusted first-run result.
 
-        Call this once after manually verifying the numbers with the client.
-        The resulting YAML becomes the regression baseline for all future deploys.
+        IMPORTANT: this is the SEEDING step only. The resulting suite cannot be used
+        for production verification until a second analyst fills in `verified_by` /
+        `verified_at` after independently reproducing each value, AND the client
+        confirms by email (`client_signoff_email` / `client_signoff_at`).
+
+        Call compare(allow_unsigned=True) for dry-run testing only.
         """
         tests = [
             GoldenValue(
@@ -199,15 +264,22 @@ class GoldenSuite:
             )
             for name, value in measure_actuals.items()
         ]
+        from datetime import datetime, timezone
+        signoff = GoldenSignoff(
+            seeded_by=seeded_by,
+            seeded_at=datetime.now(timezone.utc).isoformat() if seeded_by else "",
+        )
         suite = cls(
             client_name=client_name,
             dataset_name=dataset_name,
             reference_period=reference_period,
             tests=tests,
+            signoff=signoff,
         )
-        log.info(
+        log.warning(
             "Bootstrapped golden suite for %s with %d measures. "
-            "IMPORTANT: manually verify all values before first production use.",
+            "Signoff is INCOMPLETE — a second analyst must independently verify "
+            "and the client must confirm before this suite can be used in production.",
             client_name, len(tests),
         )
         return suite

@@ -42,9 +42,12 @@ Return structured JSON with EXACTLY these keys — no extras, no omissions:
   "headline": "One sentence. Must include the single largest KPI movement with exact % and direction.",
   "executive_summary": "2-3 sentences. What changed and why it matters. Every % cited must appear in the data.",
   "key_findings": [
-    "Finding 1 — MUST include the exact KPI name and exact % change from the data",
-    "Finding 2",
-    "Finding 3 (max 5 findings)"
+    {
+      "kpi_id": "must be one of the kpi names from the input data — EXACTLY as spelled there",
+      "direction": "up | down | flat",
+      "magnitude_pct": 12.4,
+      "context": "optional one-line context, no other KPI may be named here"
+    }
   ],
   "root_cause_analysis": {
     "claims": [
@@ -65,15 +68,46 @@ Return structured JSON with EXACTLY these keys — no extras, no omissions:
 }
 
 ## Absolute Rules
-1. Every % number in headline, executive_summary, or key_findings MUST appear verbatim in the input data.
-   Do not round, estimate, or infer percentages that aren't in the data.
-2. root_cause_analysis.claims: every claim requires an evidence_kpi and evidence_value from the data.
+1. Every % number in headline or executive_summary MUST appear verbatim in the input data.
+2. key_findings is a STRUCTURED LIST, not prose. Each item:
+   - kpi_id: must be one of the keys in kpi_deltas from input (e.g. "total_qty"). Copy exactly.
+   - direction: "up" if pct > 3, "down" if pct < -3, "flat" otherwise.
+   - magnitude_pct: absolute value of the pct from input data, no rounding beyond 1 decimal.
+   - context: optional. NEVER name a different KPI in context. NEVER state a number.
+   The prose rendering happens in code. If you write "Cost grew 12%" in context for kpi_id=total_revenue,
+   the report will be rejected.
+3. root_cause_analysis.claims: every claim requires an evidence_kpi and evidence_value from the data.
    If you cannot provide evidence, the claim belongs in unsupported_factors, not claims.
-3. If a change is within ±3%, write "stable" — do not manufacture an explanation.
-4. No hedging language anywhere: "may have", "could be", "appears to", "suggests", "in line with",
+4. If a change is within ±3%, direction is "flat" and magnitude_pct is the actual value.
+5. No hedging language anywhere: "may have", "could be", "appears to", "suggests", "in line with",
    "consistent with", "trends indicate" — these are forbidden. State the fact or stay silent.
-5. Never cite a number that does not appear in the JSON data you were given.
+6. Never cite a number that does not appear in the JSON data you were given.
 """
+
+
+@dataclass
+class KeyFinding:
+    """A single KPI movement. The LLM fills the tuple; code renders the prose.
+
+    Closes FM-09 (label-magnitude transposition): the LLM cannot say
+    "Cost grew 12%" when revenue moved 12% because it must commit to
+    a specific kpi_id from the data. Rendering happens in code.
+    """
+    kpi_id: str               # MUST be one of comparison.kpi_deltas() keys
+    direction: str            # "up" | "down" | "flat"
+    magnitude_pct: float      # absolute % change, e.g. 12.4 for "12.4%"
+    context: str = ""         # optional one-line context
+
+    def render(self, kpi_label: str | None = None) -> str:
+        label = kpi_label or self.kpi_id.replace("_", " ").title()
+        if self.direction == "flat":
+            verb = "was stable"
+            mag = ""
+        else:
+            verb = "rose" if self.direction == "up" else "fell"
+            mag = f" {self.magnitude_pct:.1f}%"
+        suffix = f" — {self.context}" if self.context else ""
+        return f"{label} {verb}{mag}{suffix}."
 
 
 @dataclass
@@ -111,7 +145,7 @@ class RootCauseAnalysis:
 class AICommentary:
     headline: str
     executive_summary: str
-    key_findings: list[str]
+    key_findings: list[KeyFinding]      # structured, not prose — closes FM-09
     root_cause_analysis: RootCauseAnalysis
     risks: list[str]
     opportunities: list[str]
@@ -119,6 +153,10 @@ class AICommentary:
     outlook: str
     period_label: str
     raw_json: str = ""
+
+    def rendered_findings(self) -> list[str]:
+        """Render structured findings into prose for HTML/Markdown output."""
+        return [f.render() for f in self.key_findings]
 
     def to_markdown(self) -> str:
         lines = [
@@ -128,7 +166,7 @@ class AICommentary:
             "\n## Key Findings",
         ]
         for finding in self.key_findings:
-            lines.append(f"- {finding}")
+            lines.append(f"- {finding.render()}")
         lines.append("\n## Root Cause Analysis")
         for claim in self.root_cause_analysis.claims:
             lines.append(f"- {claim.claim} *(Source: {claim.evidence_kpi} = {claim.evidence_value})*")
@@ -239,9 +277,16 @@ class AIAnalyst:
         Crucially, it will be blocked by the ReviewGate before delivery.
         """
         deltas = comparison.kpi_deltas()
-        bullet_lines = []
+        findings: list[KeyFinding] = []
         for kpi, delta in list(deltas.items())[:5]:
-            bullet_lines.append(f"- {kpi}: {delta['current']:,.2f} ({delta['pct']:+.1f}% vs prior month)")
+            pct = delta["pct"]
+            direction = "flat" if abs(pct) < 3 else ("up" if pct > 0 else "down")
+            findings.append(KeyFinding(
+                kpi_id=kpi,
+                direction=direction,
+                magnitude_pct=abs(pct),
+                context="[fallback — AI unavailable]",
+            ))
 
         return AICommentary(
             headline="[AI UNAVAILABLE — HUMAN REVIEW REQUIRED]",
@@ -250,7 +295,7 @@ class AIAnalyst:
                 "Raw KPI data is included below. Do not deliver this report until a human "
                 "has reviewed and completed the narrative."
             ),
-            key_findings=bullet_lines or ["No KPI data available."],
+            key_findings=findings,
             root_cause_analysis=RootCauseAnalysis(
                 claims=[],
                 unsupported_factors=["[NOT GENERATED — AI API UNAVAILABLE]"],
@@ -304,10 +349,12 @@ class AIAnalyst:
                 "All claims are in unsupported_factors — review gate will flag this."
             )
 
+        findings = self._parse_key_findings(data.get("key_findings", []))
+
         return AICommentary(
             headline=data.get("headline", ""),
             executive_summary=data.get("executive_summary", ""),
-            key_findings=data.get("key_findings", []),
+            key_findings=findings,
             root_cause_analysis=rca,
             risks=data.get("risks", []),
             opportunities=data.get("opportunities", []),
@@ -316,3 +363,28 @@ class AIAnalyst:
             period_label=period_label,
             raw_json=raw,
         )
+
+    def _parse_key_findings(self, raw: list) -> list[KeyFinding]:
+        """Parse structured findings; tolerate old string format with a synthetic placeholder."""
+        findings: list[KeyFinding] = []
+        for item in raw:
+            if isinstance(item, dict):
+                try:
+                    findings.append(KeyFinding(
+                        kpi_id=str(item.get("kpi_id", "")).strip(),
+                        direction=str(item.get("direction", "flat")).strip().lower(),
+                        magnitude_pct=float(item.get("magnitude_pct", 0.0)),
+                        context=str(item.get("context", "")).strip(),
+                    ))
+                except (TypeError, ValueError) as exc:
+                    log.warning("Skipping malformed key_finding: %s (%s)", item, exc)
+            else:
+                # Legacy string format — preserve as context with no kpi_id;
+                # gate will flag MALFORMED_FINDING because kpi_id is empty.
+                findings.append(KeyFinding(
+                    kpi_id="",
+                    direction="flat",
+                    magnitude_pct=0.0,
+                    context=str(item),
+                ))
+        return findings

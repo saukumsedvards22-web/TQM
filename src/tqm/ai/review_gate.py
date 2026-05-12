@@ -105,6 +105,7 @@ class ReviewGate:
         """Run all checks. Returns ReviewResult — never raises."""
         flags: list[ReviewFlag] = []
         flags += self._check_delta_magnitudes(comparison)
+        flags += self._check_key_findings(commentary, comparison)
         flags += self._check_number_reconciliation(commentary, comparison)
         flags += self._check_citations(commentary)
         flags += self._check_direction_conflicts(commentary, comparison)
@@ -186,15 +187,111 @@ class ReviewGate:
                 ))
         return flags
 
+    def _check_key_findings(
+        self, commentary: AICommentary, comparison: SnapshotComparison
+    ) -> list[ReviewFlag]:
+        """Validate structured KeyFindings — closes FM-09.
+
+        For each finding:
+          1. kpi_id must be a real key in comparison.kpi_deltas()
+          2. direction must match the sign of source pct
+          3. magnitude_pct must match |source pct| within 2pp
+          4. context must NOT mention any other KPI name (label transposition)
+        """
+        flags: list[ReviewFlag] = []
+        kpi_deltas = comparison.kpi_deltas()
+        known_kpis = set(kpi_deltas.keys())
+        # Lowercase variants of KPI names — for context-leak detection
+        kpi_name_tokens = {
+            tok.lower()
+            for kpi in known_kpis
+            for tok in kpi.replace("_", " ").split()
+            if len(tok) > 3  # skip "of", "by"
+        }
+
+        for i, finding in enumerate(commentary.key_findings):
+            if not finding.kpi_id:
+                flags.append(ReviewFlag(
+                    severity="block",
+                    code="MALFORMED_FINDING",
+                    message=f"key_finding[{i}] has empty kpi_id — likely legacy prose format",
+                    detail=f"Context: {finding.context[:80]}",
+                ))
+                continue
+
+            if finding.kpi_id not in known_kpis:
+                flags.append(ReviewFlag(
+                    severity="block",
+                    code="UNKNOWN_KPI",
+                    message=f"key_finding[{i}] references kpi_id='{finding.kpi_id}' which is not in source data",
+                    detail=f"Available KPIs: {sorted(known_kpis)}",
+                ))
+                continue
+
+            source_pct = kpi_deltas[finding.kpi_id]["pct"]
+            source_direction = "flat" if abs(source_pct) < 3 else ("up" if source_pct > 0 else "down")
+
+            if finding.direction != source_direction:
+                flags.append(ReviewFlag(
+                    severity="block",
+                    code="FINDING_DIRECTION_MISMATCH",
+                    message=(
+                        f"key_finding[{i}] for '{finding.kpi_id}' says '{finding.direction}' "
+                        f"but source pct is {source_pct:+.1f}% (direction='{source_direction}')"
+                    ),
+                ))
+
+            if finding.direction != "flat":
+                deviation = abs(finding.magnitude_pct - abs(source_pct))
+                if deviation > 2.0:
+                    flags.append(ReviewFlag(
+                        severity="block",
+                        code="FINDING_MAGNITUDE_MISMATCH",
+                        message=(
+                            f"key_finding[{i}] for '{finding.kpi_id}' claims {finding.magnitude_pct:.1f}% "
+                            f"but source is {abs(source_pct):.1f}% (delta {deviation:.1f}pp)"
+                        ),
+                    ))
+
+            # Context-leak check: any OTHER kpi name mentioned in context = label transposition risk
+            if finding.context:
+                ctx_lower = finding.context.lower()
+                this_kpi_tokens = {
+                    tok.lower()
+                    for tok in finding.kpi_id.replace("_", " ").split()
+                    if len(tok) > 3
+                }
+                leaked = {
+                    tok for tok in kpi_name_tokens
+                    if tok in ctx_lower and tok not in this_kpi_tokens
+                }
+                if leaked:
+                    flags.append(ReviewFlag(
+                        severity="block",
+                        code="CONTEXT_KPI_LEAK",
+                        message=(
+                            f"key_finding[{i}] for '{finding.kpi_id}' mentions other KPI tokens in context: {leaked}"
+                        ),
+                        detail=f"Context: '{finding.context}' — possible label transposition (FM-09)",
+                    ))
+
+        if not commentary.key_findings:
+            flags.append(ReviewFlag(
+                severity="warn",
+                code="NO_FINDINGS",
+                message="key_findings is empty — report has no headline movements",
+            ))
+
+        return flags
+
     def _check_number_reconciliation(
         self, commentary: AICommentary, comparison: SnapshotComparison
     ) -> list[ReviewFlag]:
         """Extract every number from commentary prose and match against source KPIs."""
-        text = " ".join([
-            commentary.headline,
-            commentary.executive_summary,
-            " ".join(commentary.key_findings),
-        ])
+        # Only reconcile prose fields. key_findings are structured and
+        # validated by _check_key_findings — reconciling them would
+        # double-flag every legitimate magnitude.
+        text = " ".join([commentary.headline, commentary.executive_summary])
         result = self._reconciler.reconcile(text, comparison)
 
         flags: list[ReviewFlag] = []
@@ -322,6 +419,9 @@ class ReviewGate:
         }
 
         if self.mode == "pending_file":
+            if self.pending_dir is None:
+                log.warning("pending_file mode but no pending_dir set — skipping file write")
+                return
             self.pending_dir.mkdir(parents=True, exist_ok=True)
             fname = f"{client_name.replace(' ', '_')}_{comparison.current.period}.pending.json"
             path = self.pending_dir / fname

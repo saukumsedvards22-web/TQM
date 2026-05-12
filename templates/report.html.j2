@@ -188,7 +188,7 @@
     <h2>Key Findings</h2>
     <ul class="findings">
       {% for finding in commentary.key_findings %}
-      <li>{{ finding }}</li>
+      <li>{{ finding.render() }}</li>
       {% endfor %}
     </ul>
   </div>

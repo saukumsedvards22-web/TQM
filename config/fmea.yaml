@@ -144,26 +144,40 @@ failure_modes:
     effect: Decision made on correct number attributed to wrong driver
     S: 7
     O: 4  # Claude can transpose subject/object in complex sentences
-    D: 9  # No current control catches label↔number transposition
+    D: 9  # raw — no control
     controls:
-      - None currently implemented
-    residual_D: 9
-    residual_RPN_note: "7 × 4 × 9 = 252 — equal to FM-02, currently unmitigated"
-    open: true
+      - KeyFinding(kpi_id, direction, magnitude_pct, context) — structural, LLM fills tuple
+      - Code renders prose from kpi_id (LLM cannot write "Cost grew" when kpi_id=total_revenue)
+      - Gate _check_key_findings: kpi_id must exist in source data
+      - Gate _check_key_findings: direction must match sign of source pct
+      - Gate _check_key_findings: magnitude_pct must match |source pct| within 2pp
+      - Gate _check_key_findings: context cannot mention other KPI name tokens (CONTEXT_KPI_LEAK)
+    residual_D: 2
+    residual_RPN_note: "7 × 4 × 2 = 56 — closed"
+    open: false
     action: >
-      Future: structured key_findings format requiring (kpi_name, direction, value) tuples
-      rather than free prose. Low priority until FM-02 and FM-06 are closed.
+      Closed via structural generation in ai/analyst.py KeyFinding and gate checks
+      MALFORMED_FINDING, UNKNOWN_KPI, FINDING_DIRECTION_MISMATCH, FINDING_MAGNITUDE_MISMATCH,
+      CONTEXT_KPI_LEAK. Pattern mirrors FM-02's RootCauseAnalysis.
 
 summary:
   high_rpn_open:
-    - FM-01  # 144 — number magnitude
-    - FM-02  # 252 — fabricated root cause
-    - FM-06  # 135 — wrong DAX filter context
+    - FM-01  # 144 — number magnitude in prose (closed by reconciler for findings; prose remains)
+    - FM-02  # 252 — fabricated root cause; mitigated structurally, process control still required
+    - FM-06  # 135 — wrong DAX filter context, mitigated by golden tests (now with two-analyst signoff)
     - FM-07  # pending DPA
-    - FM-09  # 252 — label transposition, unmitigated
+
+  closed_since_last_review:
+    - FM-09  # was 252, now 56 — closed by KeyFinding structural generation + gate checks
 
   acceptance_gate: >
     RPN > 100 with open=true means the failure mode is not controlled to an
-    acceptable level. The pipeline must not be used for automated delivery to
-    paying clients until all open high-RPN modes have confirmed mitigations.
-    Current status: FM-02, FM-09 remain open with RPN > 200.
+    acceptable level for automated delivery. The product is positioned as
+    "AI-drafted, analyst-reviewed monthly reporting" for the first 6 months
+    per client. After 6 months of clean audits per client, the FM-02 process
+    control may be downgraded to spot-check (every 3rd report).
+
+  brochure_engineering_alignment: >
+    "Fully automated" is NOT claimed. The product is a managed reporting
+    service with AI leverage. Pricing tiers reflect human review effort,
+    not just compute. See README.md for current positioning.

@@ -1,6 +1,8 @@
-# TQM — AI-powered Power BI + DAX Automation for SMEs
+# TQM — AI-leveraged Managed Reporting for SMEs
 
-> **The product:** Latvian SMEs have data sitting in Excel and SAP exports that no one is analyzing. TQM turns those files into a live Power BI dashboard and delivers a monthly management report — "here's what changed, here's why, here's what to do about it" — written by AI, reviewed by you.
+> **The product:** Latvian SMEs have data sitting in Excel and SAP exports that no one is analyzing. TQM is a **managed monthly reporting service**: we build the Power BI dashboard, our pipeline drafts the management commentary using Claude, a TQM analyst reviews and signs off every report, and your CEO/CFO receives a 2-page PDF on the 1st of each month.
+>
+> This is **not** a "fully automated AI report". The engineering controls (audit log, FMEA register, gated review) exist precisely *because* AI-drafted commentary cannot be trusted to ship unreviewed to a paying client. The price reflects the analyst hours, not the compute.
 
 ---
 
@@ -167,10 +169,15 @@ Currently open high-RPN failure modes (must be mitigated before automated delive
 
 | ID | RPN | Failure Mode | Mitigation |
 |----|-----|-------------|------------|
-| FM-02 | 252 | Fabricated root cause | Human review every RCA for 6 months |
-| FM-09 | 252 | Correct number, wrong label | Structured `key_findings` format (future) |
+| FM-02 | 252 | Fabricated root cause | Human review every RCA for 6 months (process control) |
 | FM-01 | 144 | Magnitude mismatch in prose | Golden tests on first 3 reports |
-| FM-06 | 135 | DAX wrong filter context | Golden tests before first deploy |
+| FM-06 | 135 | DAX wrong filter context | Golden tests (two-analyst signoff required) before first deploy |
+
+Recently closed:
+
+| ID | Old RPN | New RPN | Closed by |
+|----|---------|---------|-----------|
+| FM-09 | 252 | 56 | Structured `KeyFinding(kpi_id, direction, magnitude_pct, context)` — LLM fills tuple, code renders prose. Five gate checks: `MALFORMED_FINDING`, `UNKNOWN_KPI`, `FINDING_DIRECTION_MISMATCH`, `FINDING_MAGNITUDE_MISMATCH`, `CONTEXT_KPI_LEAK`. |
 
 ### On XMLA + Linux CI
 The XMLA deployment path (`powerbi/xmla.py`) requires:
@@ -196,23 +203,30 @@ Before sending any client data to the Anthropic API:
 | Capability | Average AI agency | TQM |
 |-----------|-------------------|-----|
 | Reads SAP pipe-delimited exports | ✗ | ✓ |
-| Generates correct DAX (not hallucinated) | ✗ | ✓ |
+| Generates correct DAX, then verifies it | ✗ | ✓ |
 | Knows Latvian business context | ✗ | ✓ |
+| Structured findings — LLM fills tuples, code writes prose (closes FM-09) | ✗ | ✓ |
 | Structured root cause with cited evidence | ✗ | ✓ |
-| Number reconciliation before delivery | ✗ | ✓ |
+| Number reconciliation between prose and source | ✗ | ✓ |
 | Per-client volatility thresholds | ✗ | ✓ |
 | FMEA register with RPN scores | ✗ | ✓ |
+| Two-analyst golden test signoff | ✗ | ✓ |
 | Immutable audit log for dispute resolution | ✗ | ✓ |
-| Fully automated monthly delivery | ✗ | ✓ (after human sign-off period) |
+| Honest about what's automated and what isn't | ✗ | ✓ |
 
 ---
 
-## Pricing model (retainer)
+## Pricing model (managed retainer)
 
-| Tier | Deliverables | Price |
-|------|-------------|-------|
-| **Starter** | 1 dashboard + monthly PDF report + human-reviewed commentary | €490/mo |
-| **Growth** | 3 dashboards + report + email delivery | €890/mo |
-| **Scale** | Unlimited dashboards + weekly updates + Slack alerts | €1,890/mo |
+Pricing reflects analyst review hours, not compute. AI is leverage on analyst time, not a replacement for it.
 
-Setup fee: €1,500–3,000 (one-time, covers ingestion build + initial dashboard + golden test sign-off).
+| Tier | Deliverables | Analyst review | Price |
+|------|-------------|---------------|-------|
+| **Reviewed** | 1 dashboard + monthly PDF, every report reviewed by analyst, 15-min walk-through call | ~2 h/mo | €690/mo |
+| **Reviewed Plus** | 3 dashboards + reports + email delivery + 30-min CFO call | ~5 h/mo | €1,290/mo |
+| **Audit Trail** | Unlimited dashboards + weekly mid-month updates + Slack alerts + full audit log access | ~10 h/mo | €2,490/mo |
+| **Spot-Check** (after 6 clean months) | Reviewed tier with spot-check (every 3rd report only) | ~0.5 h/mo | €390/mo |
+
+Setup fee: **€2,500–4,500** (one-time). Covers ingestion build, schema mapping, initial dashboard, golden test seeding by one analyst, independent verification by a second, and client signoff. Without this, the production gate refuses to run.
+
+The €390 Spot-Check tier is what most clients eventually settle into. The path there is six months of reviewed delivery so we both trust the pipeline.
