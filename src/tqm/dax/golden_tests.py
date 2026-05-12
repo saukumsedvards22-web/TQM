@@ -1,0 +1,224 @@
+"""Golden-value unit tests for DAX measures.
+
+The static validator catches syntax errors. This catches semantic errors:
+wrong filter context, missing USERELATIONSHIP, row-context propagation bugs,
+time intelligence on the wrong date table. These compile fine. They produce
+wrong numbers. Only execution against known-good data reveals them.
+
+Workflow:
+  1. For each generated measure, the analyst specifies expected values
+     against a reference dataset (the first month of real client data).
+  2. These expected values are stored as a golden file (YAML).
+  3. On every subsequent deploy, the measures are executed via DAX Studio
+     or the XMLA endpoint and results compared to golden values.
+  4. Deviation > TOLERANCE_PCT is a deployment blocker.
+
+Without golden tests, criterion 4 ("zero DAX errors") is syntactic safety only.
+With them, you have positive verification that the math is correct.
+
+This module handles:
+  - Golden file schema (YAML)
+  - Golden value capture from a reference query result
+  - Golden value comparison
+  - Report generation
+
+Execution of DAX itself requires an XMLA-reachable dataset and is done
+via the CLI (tqm dax golden-verify) or Tabular Editor CLI.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+log = logging.getLogger(__name__)
+
+TOLERANCE_PCT = 0.1  # 0.1% — tighter than reconciliation; this is math not prose
+
+
+@dataclass
+class GoldenValue:
+    measure_name: str
+    filter_context: str        # plain-English description e.g. "All data, no filter"
+    dax_filter: str            # e.g. "ALL(sales)" or "sales[region] = \"Rīga\""
+    expected_value: float
+    tolerance_pct: float = TOLERANCE_PCT
+    notes: str = ""
+
+
+@dataclass
+class GoldenTestResult:
+    measure_name: str
+    filter_context: str
+    expected: float
+    actual: float | None
+    passed: bool
+    deviation_pct: float | None
+    error: str = ""
+
+    def summary_line(self) -> str:
+        if self.error:
+            return f"  ❌ [{self.measure_name}] ERROR: {self.error}"
+        if self.actual is None:
+            return f"  ⚠️  [{self.measure_name}] No result returned"
+        icon = "✅" if self.passed else "❌"
+        return (
+            f"  {icon} [{self.measure_name}] ({self.filter_context}) "
+            f"expected={self.expected:,.4f} actual={self.actual:,.4f} "
+            f"deviation={self.deviation_pct:.3f}%"
+        )
+
+
+@dataclass
+class GoldenSuite:
+    client_name: str
+    dataset_name: str
+    reference_period: str
+    tests: list[GoldenValue] = field(default_factory=list)
+
+    # ------------------------------------------------------------------
+    # Serialisation
+    # ------------------------------------------------------------------
+
+    def save(self, path: Path) -> None:
+        data = {
+            "client_name": self.client_name,
+            "dataset_name": self.dataset_name,
+            "reference_period": self.reference_period,
+            "tests": [
+                {
+                    "measure_name": t.measure_name,
+                    "filter_context": t.filter_context,
+                    "dax_filter": t.dax_filter,
+                    "expected_value": t.expected_value,
+                    "tolerance_pct": t.tolerance_pct,
+                    "notes": t.notes,
+                }
+                for t in self.tests
+            ],
+        }
+        path.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        log.info("Golden suite saved: %s (%d tests)", path, len(self.tests))
+
+    @classmethod
+    def load(cls, path: Path) -> "GoldenSuite":
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        tests = [GoldenValue(**t) for t in data.get("tests", [])]
+        return cls(
+            client_name=data["client_name"],
+            dataset_name=data["dataset_name"],
+            reference_period=data["reference_period"],
+            tests=tests,
+        )
+
+    # ------------------------------------------------------------------
+    # Comparison
+    # ------------------------------------------------------------------
+
+    def compare(self, actuals: dict[str, float | None]) -> list[GoldenTestResult]:
+        """Compare expected values against actuals dict (measure_name -> value)."""
+        results: list[GoldenTestResult] = []
+        for test in self.tests:
+            actual = actuals.get(test.measure_name)
+            if actual is None:
+                results.append(GoldenTestResult(
+                    measure_name=test.measure_name,
+                    filter_context=test.filter_context,
+                    expected=test.expected_value,
+                    actual=None,
+                    passed=False,
+                    deviation_pct=None,
+                    error="Measure not found in actuals — not deployed or name mismatch",
+                ))
+                continue
+
+            if test.expected_value == 0:
+                deviation_pct = abs(actual) * 100  # anything non-zero is infinite deviation
+            else:
+                deviation_pct = abs(actual - test.expected_value) / abs(test.expected_value) * 100
+
+            passed = deviation_pct <= test.tolerance_pct
+            results.append(GoldenTestResult(
+                measure_name=test.measure_name,
+                filter_context=test.filter_context,
+                expected=test.expected_value,
+                actual=actual,
+                passed=passed,
+                deviation_pct=deviation_pct,
+            ))
+        return results
+
+    def report(self, actuals: dict[str, float | None]) -> str:
+        results = self.compare(actuals)
+        passed = sum(1 for r in results if r.passed)
+        lines = [
+            f"Golden test results — {self.client_name} / {self.reference_period}",
+            f"{passed}/{len(results)} passed  (tolerance ≤ {TOLERANCE_PCT}%)",
+            "",
+        ]
+        lines += [r.summary_line() for r in results]
+        failed = [r for r in results if not r.passed]
+        if failed:
+            lines += [
+                "",
+                "FAILED MEASURES — do not deploy until these pass:",
+                *[f"  {r.measure_name}: expected {r.expected:.4f}, got {r.actual}" for r in failed],
+            ]
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Bootstrap helper — generate a golden file from a known-good run
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def bootstrap_from_dataframe(
+        cls,
+        client_name: str,
+        dataset_name: str,
+        reference_period: str,
+        measure_actuals: dict[str, float],
+        tolerance_pct: float = TOLERANCE_PCT,
+    ) -> "GoldenSuite":
+        """Create a golden suite from a trusted first-run result.
+
+        Call this once after manually verifying the numbers with the client.
+        The resulting YAML becomes the regression baseline for all future deploys.
+        """
+        tests = [
+            GoldenValue(
+                measure_name=name,
+                filter_context="All data, no filter",
+                dax_filter="",
+                expected_value=value,
+                tolerance_pct=tolerance_pct,
+                notes="Bootstrap — verify manually before treating as authoritative",
+            )
+            for name, value in measure_actuals.items()
+        ]
+        suite = cls(
+            client_name=client_name,
+            dataset_name=dataset_name,
+            reference_period=reference_period,
+            tests=tests,
+        )
+        log.info(
+            "Bootstrapped golden suite for %s with %d measures. "
+            "IMPORTANT: manually verify all values before first production use.",
+            client_name, len(tests),
+        )
+        return suite
+
+    def dax_query_script(self) -> str:
+        """Generate a DAX Studio query script to evaluate all test measures."""
+        lines = ["// Golden test queries — paste into DAX Studio", ""]
+        for test in self.tests:
+            filter_clause = f"CALCULATETABLE(ROW(\"{test.measure_name}\", [{test.measure_name}]), {test.dax_filter})" \
+                if test.dax_filter else f"ROW(\"{test.measure_name}\", [{test.measure_name}])"
+            lines.append(f"// {test.filter_context}")
+            lines.append(f"EVALUATE {filter_clause}")
+            lines.append("")
+        return "\n".join(lines)

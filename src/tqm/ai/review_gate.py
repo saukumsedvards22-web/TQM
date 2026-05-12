@@ -1,13 +1,12 @@
 """Human review gate — holds reports for approval before delivery.
 
-Rules:
-  1. Any KPI delta > THRESHOLD_PCT triggers a hold.
-  2. Any KPI with suspiciously round numbers (possible misclassification) triggers a hold.
-  3. Any root_cause_analysis containing hedging language triggers a hold.
-  4. The gate writes a review packet to disk and either:
-     - Blocks until stdin approval (interactive)
-     - Writes a .pending file and exits 0 (CI/async mode)
-     - Emails the reviewer instead of the CEO (review_email mode)
+Checks (in order of severity):
+  1. Per-KPI volatility-based delta threshold (not fixed %)
+  2. Number reconciliation — every figure in prose matched against source data
+  3. Citation enforcement — root_cause_analysis must have ≥1 grounded claim
+  4. Direction conflict — sign of narrative must match sign of data
+  5. Round-number smell — possible column misclassification
+  6. No fallback commentary reaching delivery
 
 Never email the CEO without passing through this gate.
 """
@@ -17,26 +16,20 @@ from __future__ import annotations
 import json
 import logging
 import re
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .analyst import AICommentary
+from .reconciler import NumberReconciler
 from .snapshot import SnapshotComparison
+
+if TYPE_CHECKING:
+    from .volatility import VolatilityProfile
 
 log = logging.getLogger(__name__)
 
-# Language that signals Claude is guessing rather than analysing
-_HALLUCINATION_MARKERS = re.compile(
-    r"\b(may have|might be|could be|possibly|perhaps|it appears|seems to|"
-    r"likely due to|probably|supply chain disruption|macroeconomic|"
-    r"global uncertainty|market conditions)\b",
-    re.I,
-)
-
-# Numbers that suggest a misclassified column (e.g., discount % read as revenue)
 _SUSPICIOUSLY_ROUND = re.compile(r"\b(100\.0|1000\.0|10000\.0|0\.0)\b")
 
 
@@ -75,22 +68,29 @@ class ReviewGate:
     """Automated pre-delivery review gate.
 
     Args:
-        delta_block_pct: KPI changes beyond ±this% trigger a block.
-        delta_warn_pct:  KPI changes beyond ±this% trigger a warning.
+        volatility_profile: Per-KPI thresholds from VolatilityTracker.
+                            If None, falls back to static_fallback_pct.
+        static_fallback_pct: Conservative threshold used when no history exists.
         mode: "interactive" | "pending_file" | "raise"
     """
 
     def __init__(
         self,
-        delta_block_pct: float = 40.0,
-        delta_warn_pct: float = 15.0,
+        volatility_profile: "VolatilityProfile | None" = None,
+        static_fallback_pct: float = 15.0,
         mode: Literal["interactive", "pending_file", "raise"] = "raise",
         pending_dir: Path = Path("output/pending"),
+        # kept for backward-compat with CLI — ignored when profile present
+        delta_block_pct: float | None = None,
     ) -> None:
-        self.delta_block_pct = delta_block_pct
-        self.delta_warn_pct = delta_warn_pct
+        self.volatility_profile = volatility_profile
+        self.static_fallback_pct = static_fallback_pct
+        # CLI override: explicit delta_block_pct overrides static fallback
+        if delta_block_pct is not None:
+            self.static_fallback_pct = delta_block_pct
         self.mode = mode
         self.pending_dir = pending_dir
+        self._reconciler = NumberReconciler()
 
     # ------------------------------------------------------------------
     # Public API
@@ -105,11 +105,13 @@ class ReviewGate:
         """Run all checks. Returns ReviewResult — never raises."""
         flags: list[ReviewFlag] = []
         flags += self._check_delta_magnitudes(comparison)
-        flags += self._check_hallucination_language(commentary)
-        flags += self._check_round_numbers(comparison)
+        flags += self._check_number_reconciliation(commentary, comparison)
+        flags += self._check_citations(commentary)
         flags += self._check_direction_conflicts(commentary, comparison)
+        flags += self._check_round_numbers(comparison)
+        flags += self._check_fallback_marker(commentary)
 
-        passed = len([f for f in flags if f.severity == "block"]) == 0
+        passed = not any(f.severity == "block" for f in flags)
         result = ReviewResult(passed=passed, flags=flags)
 
         if not passed:
@@ -140,7 +142,9 @@ class ReviewGate:
 
         print("\n--- AI Commentary ---")
         print(f"Headline: {commentary.headline}")
-        print(f"Root cause: {commentary.root_cause_analysis[:300]}…")
+        rca = commentary.root_cause_analysis
+        n_claims = rca.citation_count()
+        print(f"Root cause: {n_claims} cited claim(s), {len(rca.unsupported_factors)} unsupported factor(s)")
 
         print("\n" + "=" * 60)
         answer = input("Approve delivery? [y/N] ").strip().lower()
@@ -151,59 +155,99 @@ class ReviewGate:
     # ------------------------------------------------------------------
 
     def _check_delta_magnitudes(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
+        """Block on KPI changes beyond per-KPI volatility threshold."""
         flags: list[ReviewFlag] = []
         for kpi, delta in comparison.kpi_deltas().items():
             pct = abs(delta["pct"])
-            if pct >= self.delta_block_pct:
+
+            if self.volatility_profile:
+                t = self.volatility_profile.get_threshold(kpi)
+                block_at = t.threshold_pct
+                warn_at = block_at * 0.6
+                method_note = f"threshold={block_at:.1f}% ({t.method}, n={t.history_count})"
+            else:
+                block_at = self.static_fallback_pct
+                warn_at = block_at * 0.6
+                method_note = f"threshold={block_at:.1f}% (static fallback — no history)"
+
+            if pct >= block_at:
                 flags.append(ReviewFlag(
                     severity="block",
-                    code="LARGE_DELTA",
-                    message=f"{kpi} changed {delta['pct']:+.1f}% — verify this is real data, not a column shift",
+                    code="ANOMALOUS_DELTA",
+                    message=f"{kpi} changed {delta['pct']:+.1f}% — exceeds {method_note}",
                     detail=f"Current: {delta['current']:,.2f}  Previous: {delta['previous']:,.2f}",
                 ))
-            elif pct >= self.delta_warn_pct:
+            elif pct >= warn_at:
                 flags.append(ReviewFlag(
                     severity="warn",
                     code="NOTABLE_DELTA",
-                    message=f"{kpi} changed {delta['pct']:+.1f}%",
+                    message=f"{kpi} changed {delta['pct']:+.1f}% — above 60% of {method_note}",
                     detail=f"Current: {delta['current']:,.2f}  Previous: {delta['previous']:,.2f}",
                 ))
         return flags
 
-    def _check_hallucination_language(self, commentary: AICommentary) -> list[ReviewFlag]:
+    def _check_number_reconciliation(
+        self, commentary: AICommentary, comparison: SnapshotComparison
+    ) -> list[ReviewFlag]:
+        """Extract every number from commentary prose and match against source KPIs."""
+        text = " ".join([
+            commentary.headline,
+            commentary.executive_summary,
+            " ".join(commentary.key_findings),
+        ])
+        result = self._reconciler.reconcile(text, comparison)
+
         flags: list[ReviewFlag] = []
-        text = f"{commentary.root_cause_analysis} {commentary.executive_summary}"
-        matches = _HALLUCINATION_MARKERS.findall(text)
-        if matches:
+        for issue in result.issues:
             flags.append(ReviewFlag(
-                severity="block",
-                code="SPECULATIVE_LANGUAGE",
-                message="Root cause analysis contains hedging phrases — Claude may be fabricating context",
-                detail=f"Phrases found: {', '.join(set(m.lower() for m in matches))}",
+                severity=issue.severity,
+                code=issue.code,
+                message=issue.message,
+                detail=f"Extracted: '{issue.extracted}'"
+                + (f"  Source: {issue.source_value:.1f}" if issue.source_value is not None else ""),
             ))
+
+        if result.numbers_checked > 0:
+            log.info(
+                "Number reconciliation: %d/%d verified, %d issue(s)",
+                result.numbers_matched, result.numbers_checked, len(result.issues),
+            )
         return flags
 
-    def _check_round_numbers(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
+    def _check_citations(self, commentary: AICommentary) -> list[ReviewFlag]:
+        """Require at least one cited, evidence-backed causal claim."""
+        rca = commentary.root_cause_analysis
         flags: list[ReviewFlag] = []
-        for kpi, delta in comparison.kpi_deltas().items():
-            for label, val in [("current", delta["current"]), ("previous", delta["previous"])]:
-                if _SUSPICIOUSLY_ROUND.search(f"{val:.1f}"):
-                    flags.append(ReviewFlag(
-                        severity="warn",
-                        code="ROUND_NUMBER",
-                        message=f"{kpi} {label} value is suspiciously round ({val})",
-                        detail="Check: is this a percentage column misread as a monetary column?",
-                    ))
+
+        if rca.citation_count() == 0:
+            flags.append(ReviewFlag(
+                severity="block",
+                code="NO_CITATIONS",
+                message="root_cause_analysis has zero KPI-backed claims — all factors are unsupported",
+                detail=(
+                    f"{len(rca.unsupported_factors)} unsupported factor(s) present. "
+                    "Claude could not ground causation in the data, or returned the old string format."
+                ),
+            ))
+        elif rca.citation_count() < 2:
+            flags.append(ReviewFlag(
+                severity="warn",
+                code="WEAK_CITATION",
+                message=f"Only {rca.citation_count()} cited claim(s) — verify it's sufficient for the narrative",
+            ))
         return flags
 
     def _check_direction_conflicts(
         self, commentary: AICommentary, comparison: SnapshotComparison
     ) -> list[ReviewFlag]:
-        """Catch cases where Claude says 'revenue grew' but data shows a decline."""
+        """Catch sign errors: commentary says grew, data shows decline (or vice versa)."""
         flags: list[ReviewFlag] = []
         text = (commentary.headline + " " + commentary.executive_summary).lower()
 
-        revenue_kpis = [k for k in comparison.kpi_deltas() if any(x in k for x in ("revenue", "sales", "amount"))]
+        revenue_kpis = [
+            k for k in comparison.kpi_deltas()
+            if any(x in k for x in ("revenue", "sales", "amount"))
+        ]
         for kpi in revenue_kpis:
             delta = comparison.kpi_deltas()[kpi]
             actual_up = delta["pct"] > 0
@@ -214,17 +258,41 @@ class ReviewGate:
                 flags.append(ReviewFlag(
                     severity="block",
                     code="DIRECTION_CONFLICT",
-                    message=f"Commentary says revenue fell but {kpi} is up {delta['pct']:+.1f}%",
+                    message=f"Commentary says revenue fell but {kpi} is {delta['pct']:+.1f}%",
                     detail="Claude likely hallucinated the narrative direction.",
                 ))
             elif not actual_up and said_grew:
                 flags.append(ReviewFlag(
                     severity="block",
                     code="DIRECTION_CONFLICT",
-                    message=f"Commentary says revenue grew but {kpi} is down {delta['pct']:+.1f}%",
+                    message=f"Commentary says revenue grew but {kpi} is {delta['pct']:+.1f}%",
                     detail="Claude likely hallucinated the narrative direction.",
                 ))
         return flags
+
+    def _check_round_numbers(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
+        flags: list[ReviewFlag] = []
+        for kpi, delta in comparison.kpi_deltas().items():
+            for label, val in [("current", delta["current"]), ("previous", delta["previous"])]:
+                if _SUSPICIOUSLY_ROUND.search(f"{val:.1f}"):
+                    flags.append(ReviewFlag(
+                        severity="warn",
+                        code="ROUND_NUMBER",
+                        message=f"{kpi} {label} is suspiciously round ({val})",
+                        detail="Check: percentage column misread as monetary?",
+                    ))
+        return flags
+
+    def _check_fallback_marker(self, commentary: AICommentary) -> list[ReviewFlag]:
+        """Block delivery of the API-unavailable fallback commentary."""
+        if "[AI UNAVAILABLE" in commentary.headline:
+            return [ReviewFlag(
+                severity="block",
+                code="FALLBACK_COMMENTARY",
+                message="Commentary is the API-unavailable fallback — do not deliver",
+                detail="Anthropic API was unreachable during generation. Complete the narrative manually.",
+            )]
+        return []
 
     # ------------------------------------------------------------------
     # Failure handling
@@ -243,7 +311,11 @@ class ReviewGate:
             "review": result.to_dict(),
             "commentary": {
                 "headline": commentary.headline,
-                "root_cause_analysis": commentary.root_cause_analysis,
+                "root_cause_claims": [
+                    {"claim": c.claim, "kpi": c.evidence_kpi, "value": c.evidence_value}
+                    for c in commentary.root_cause_analysis.claims
+                ],
+                "unsupported_factors": commentary.root_cause_analysis.unsupported_factors,
                 "executive_summary": commentary.executive_summary,
             },
             "kpi_deltas": comparison.kpi_deltas(),

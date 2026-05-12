@@ -179,19 +179,70 @@ class DateColumnValidator:
         return result
 
     def pick_best_date_column(
-        self, df: pd.DataFrame, candidates: list[str]
+        self,
+        df: pd.DataFrame,
+        candidates: list[str],
+        explicit_config: str | None = None,
     ) -> tuple[str | None, DateValidationResult | None]:
-        """Try each candidate and return the first that passes validation."""
-        for col in candidates:
-            result = self.validate(df, col)
-            if result.passed:
-                return col, result
+        """Select the date column, with strict ambiguity handling.
 
-        # None passed — return the one with fewest blockers
-        if candidates:
-            results = [(col, self.validate(df, col)) for col in candidates]
-            best = min(results, key=lambda x: len(x[1].blockers))
-            log.warning("No date column passed validation. Best candidate: %s", best[0])
-            return best[0], best[1]
+        Priority:
+          1. explicit_config — if set, validate and return it (or raise if it fails).
+          2. Exactly one candidate passes — return it.
+          3. Zero candidates pass — log error, return best (fewest blockers).
+          4. Multiple candidates pass — ABORT. This is the shipping/logistics
+             problem: order_date vs ship_date vs posted_date all pass validation
+             but mean different things. Silence here means wrong time-intelligence.
+             The caller must specify explicit_config or the pipeline stops.
 
-        return None, None
+        Returns (column_name, validation_result) or (None, None) if no candidates.
+        Raises DateAmbiguityError when multiple candidates pass and no config given.
+        """
+        if not candidates:
+            return None, None
+
+        # Explicit config overrides everything
+        if explicit_config:
+            if explicit_config not in df.columns:
+                raise ValueError(
+                    f"Configured date_column '{explicit_config}' not found in data. "
+                    f"Available columns: {list(df.columns)}"
+                )
+            result = self.validate(df, explicit_config)
+            if not result.passed:
+                log.warning(
+                    "Configured date_column '%s' has validation issues:\n%s",
+                    explicit_config, result.summary(),
+                )
+            return explicit_config, result
+
+        # Auto-detect: evaluate all candidates
+        results = [(col, self.validate(df, col)) for col in candidates]
+        passing = [(col, r) for col, r in results if r.passed]
+
+        if len(passing) == 1:
+            col, result = passing[0]
+            log.info("Date column auto-selected: '%s'", col)
+            return col, result
+
+        if len(passing) > 1:
+            passing_names = [col for col, _ in passing]
+            raise DateAmbiguityError(
+                f"Multiple date columns passed validation: {passing_names}.\n"
+                "Specify 'date_column' in your client config to disambiguate.\n"
+                "In shipping/logistics data this is order_date vs ship_date vs posted_date "
+                "— they produce different YTD and MoM figures. Do not auto-resolve."
+            )
+
+        # None passed — return least-broken candidate with a warning
+        best_col, best_result = min(results, key=lambda x: len(x[1].blockers))
+        log.error(
+            "No date column passed validation. Returning least-broken candidate '%s'. "
+            "Time-intelligence measures may be incorrect. Specify 'date_column' in config.",
+            best_col,
+        )
+        return best_col, best_result
+
+
+class DateAmbiguityError(RuntimeError):
+    """Raised when multiple date columns pass validation and no explicit config is set."""

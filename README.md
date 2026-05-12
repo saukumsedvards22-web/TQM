@@ -142,6 +142,55 @@ docker compose run --rm tqm report data/cur.csv data/prev.csv \
 
 ---
 
+## Acceptance criteria before automated delivery to a paying client
+
+These are the conditions under which you can sleep at night. Not before.
+
+### Negative gates (block bad output)
+- [ ] Schema drift check passes — no missing columns, no type regressions
+- [ ] Date column validated — correct period coverage, no ambiguity (`date_column` set in config)
+- [ ] DAX static validation passes — zero syntax errors
+- [ ] Review gate passes — no `ANOMALOUS_DELTA`, `NO_CITATIONS`, `DIRECTION_CONFLICT`, `NUMERIC_MISMATCH`
+- [ ] `FALLBACK_COMMENTARY` not triggered — API was reachable during generation
+- [ ] DPA in place — client has signed sub-processor disclosure covering Anthropic (see FM-07)
+
+### Positive verifications (confirm good output)
+- [ ] **Golden tests bootstrapped and signed off** — client has verified the reference-period numbers
+- [ ] **First 3 reports reviewed by a human analyst** before automated send is enabled per client
+- [ ] **Root cause claims manually checked** for first 6 months — every `evidence_kpi` maps to a real
+      column the client can open in their Excel file
+- [ ] **Audit log entry exists** for this run — source hash, prompt hash, gate result retained
+
+### FMEA status
+Run `python scripts/fmea_report.py` before each new client onboarding.
+Currently open high-RPN failure modes (must be mitigated before automated delivery):
+
+| ID | RPN | Failure Mode | Mitigation |
+|----|-----|-------------|------------|
+| FM-02 | 252 | Fabricated root cause | Human review every RCA for 6 months |
+| FM-09 | 252 | Correct number, wrong label | Structured `key_findings` format (future) |
+| FM-01 | 144 | Magnitude mismatch in prose | Golden tests on first 3 reports |
+| FM-06 | 135 | DAX wrong filter context | Golden tests before first deploy |
+
+### On XMLA + Linux CI
+The XMLA deployment path (`powerbi/xmla.py`) requires:
+- Power BI Premium Per User (PPU) or Premium capacity on the target workspace
+- .NET runtime accessible to Tabular Editor CLI
+- Post-deploy verification: query `Information_Schema.MEASURE_NAME` via XMLA to assert measure count
+
+On Linux CI this is reliably rough. If you can't confirm post-deploy measure count, treat every DAX
+deploy as unverified and re-run golden tests manually from DAX Studio before the report runs.
+
+### On data privacy (GDPR / DPA)
+Customer names, transaction amounts, and segment labels are personal or commercially sensitive data.
+Before sending any client data to the Anthropic API:
+1. Confirm Anthropic is listed as a sub-processor in your DPA with the client
+2. Anthropic's DPA: https://www.anthropic.com/legal/dpa
+3. Consider hashing customer names in the prompt context (`customer_hash` instead of `"Rimi Latvia"`)
+4. Data does not leave the EU under Anthropic's EU endpoint — confirm region is set correctly
+
+---
+
 ## Why this beats a vanilla AI agency
 
 | Capability | Average AI agency | TQM |
@@ -149,10 +198,12 @@ docker compose run --rm tqm report data/cur.csv data/prev.csv \
 | Reads SAP pipe-delimited exports | ✗ | ✓ |
 | Generates correct DAX (not hallucinated) | ✗ | ✓ |
 | Knows Latvian business context | ✗ | ✓ |
-| Explains *why* not just *what* | ✗ | ✓ |
-| Push dataset → no PBIX needed | ✗ | ✓ |
-| Prompt caching (fast + cheap at scale) | ✗ | ✓ |
-| Fully automated monthly delivery | ✗ | ✓ |
+| Structured root cause with cited evidence | ✗ | ✓ |
+| Number reconciliation before delivery | ✗ | ✓ |
+| Per-client volatility thresholds | ✗ | ✓ |
+| FMEA register with RPN scores | ✗ | ✓ |
+| Immutable audit log for dispute resolution | ✗ | ✓ |
+| Fully automated monthly delivery | ✗ | ✓ (after human sign-off period) |
 
 ---
 
@@ -160,8 +211,8 @@ docker compose run --rm tqm report data/cur.csv data/prev.csv \
 
 | Tier | Deliverables | Price |
 |------|-------------|-------|
-| **Starter** | 1 dashboard + monthly PDF report | €490/mo |
+| **Starter** | 1 dashboard + monthly PDF report + human-reviewed commentary | €490/mo |
 | **Growth** | 3 dashboards + report + email delivery | €890/mo |
 | **Scale** | Unlimited dashboards + weekly updates + Slack alerts | €1,890/mo |
 
-Setup fee: €1,500–3,000 (one-time, covers ingestion build + initial dashboard).
+Setup fee: €1,500–3,000 (one-time, covers ingestion build + initial dashboard + golden test sign-off).

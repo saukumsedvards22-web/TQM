@@ -1,0 +1,169 @@
+# FMEA Register — TQM AI Reporting Pipeline
+# Severity (S): 1-10  (10 = client relationship ends / legal exposure)
+# Occurrence (O): 1-10 (10 = happens every run without controls)
+# Detection (D): 1-10  (10 = completely undetected before delivery)
+# RPN = S × O × D   (>100 = must have a mitigation in place before production)
+#
+# The point the reviewer made: "plausibly correct but actually wrong output"
+# has a HIGH detection score because it bypasses every upstream check.
+# That is exactly the failure mode this register quantifies.
+
+failure_modes:
+
+  - id: FM-01
+    name: Wrong number in commentary matches source sign but not magnitude
+    example: "'Revenue grew 12%' when actual delta is 8%"
+    effect: CEO makes wrong resource allocation decision
+    S: 8
+    O: 6  # Claude frequently rounds/approximates
+    D: 7  # Direction check passes; magnitude check was absent before reconciler
+    controls:
+      - NumberReconciler (>2pp deviation → block)
+    residual_D: 3
+    residual_RPN_note: "8 × 6 × 3 = 144 — still high. Requires golden tests on first 3 reports."
+    open: true
+    action: "Per-client golden tests on first 3 live reports before automated send"
+
+  - id: FM-02
+    name: Fabricated root cause (no data support)
+    example: "'Q1 softness driven by Baltic supply chain disruption'"
+    effect: CEO investigates wrong problem; trust destroyed when cause is proven false
+    S: 9
+    O: 7  # Claude confabulates causal explanations when data is ambiguous
+    D: 8  # Previously: phrase-list detection misses novel hedges
+    controls:
+      - Structured RootCauseAnalysis with mandatory evidence_kpi + evidence_value
+      - NO_CITATIONS gate check (blocks when zero cited claims)
+      - Prompt rule 4 (forbidden phrase list, now as a structural constraint not filter)
+    residual_D: 4
+    residual_RPN_note: "9 × 7 × 4 = 252 — still the highest-risk mode."
+    open: true
+    action: >
+      Human reads every root_cause_analysis for first 6 months per client.
+      After 6 months of clean audits, move to spot-check (every 3rd report).
+      This is a process control, not a code control.
+
+  - id: FM-03
+    name: Wrong date column used for time-intelligence
+    example: "ship_date used instead of order_date; MoM and YTD are 3 days shifted"
+    effect: All time-intelligence measures silently wrong; numbers plausible so undetected
+    S: 8
+    O: 4  # Logistics/distribution clients likely; pure sales data less likely
+    D: 9  # Previously: auto-selection hid ambiguity. Now: DateAmbiguityError raised
+    controls:
+      - DateColumnValidator (blocks on type regression, null rate, period mismatch)
+      - DateAmbiguityError on multiple passing candidates (requires explicit config)
+      - Golden tests verify time-intelligence measures against known-good reference
+    residual_D: 2
+    residual_RPN_note: "8 × 4 × 2 = 64 — acceptable with explicit config required"
+    open: false
+
+  - id: FM-04
+    name: Schema drift — column dropped/renamed in SAP export
+    example: "amount_lc renamed to amount_eur; prior month comparison uses wrong column"
+    effect: MoM deltas are nonsense; numbers may pass gate if magnitude is plausible
+    S: 8
+    O: 5  # SAP exports change format on version upgrades, year-end rollovers
+    D: 3  # SchemaDriftDetector blocks on missing columns
+    controls:
+      - SchemaDriftDetector (missing column → pipeline abort)
+      - Type regression check (numeric→text → pipeline abort)
+    residual_D: 2
+    open: false
+
+  - id: FM-05
+    name: Anthropic API down on report day
+    example: "Monthly run on 1st of month, API returns 503"
+    effect: Report not generated; client receives nothing or receives fallback
+    S: 4  # Late delivery; not wrong data
+    O: 2  # Anthropic SLA is high; monthly run window is narrow
+    D: 1  # Fallback commentary is clearly marked and blocked by gate
+    controls:
+      - 4-attempt exponential retry
+      - Fallback commentary with FALLBACK_COMMENTARY gate block
+      - CostTracker logs the failure
+    residual_D: 1
+    open: false
+
+  - id: FM-06
+    name: Generated DAX has wrong filter context (compiles, produces wrong number)
+    example: "ALL() instead of ALLEXCEPT(); measure ignores region filter"
+    effect: KPI cards on dashboard show wrong numbers; CEO sees inflated/deflated figures
+    S: 9
+    O: 5  # Claude generates syntactically valid but semantically wrong DAX regularly
+    D: 8  # Static validator passes; wrong number only visible on execution
+    controls:
+      - DAXValidator (syntax only — explicitly documented as not semantic)
+      - GoldenTestSuite (execution verification against known-good reference)
+    residual_D: 3  # With golden tests covering critical measures
+    residual_RPN_note: "9 × 5 × 3 = 135 — requires golden tests before first production deploy"
+    open: true
+    action: >
+      Bootstrap golden test suite from first verified run.
+      Client must sign off on golden values before automated deploy is enabled.
+      Re-run golden tests on every DAX regeneration (model change or new data columns).
+
+  - id: FM-07
+    name: Client data sent to Anthropic without DPA in place
+    example: "First live run before legal review completed"
+    effect: GDPR Article 28 violation; personal data (customer names, amounts) processed without lawful basis
+    S: 10
+    O: 3  # Only occurs if legal checklist is skipped
+    D: 2  # Would be caught at legal review
+    controls:
+      - Pre-flight checklist item (see scripts/pre_flight_checklist.md)
+      - Client DPA must include sub-processor disclosure for Anthropic
+      - Consider anonymising customer names in prompt (replace with IDs)
+    residual_D: 1
+    open: true
+    action: >
+      Add DPA confirmation gate to CLI: --confirm-dpa flag required for email delivery.
+      Default prompt context should hash/anonymise customer names.
+      Anthropic EU DPA available at: https://www.anthropic.com/legal/dpa
+
+  - id: FM-08
+    name: XMLA deployment fails silently on Linux CI
+    example: "Tabular Editor CLI exits 0 but model not deployed (no Premium capacity)"
+    effect: Measures appear to deploy; dashboard still shows old measures or errors
+    S: 6
+    O: 4  # Linux TE2 + Premium requirement is genuinely rough
+    D: 6  # TE2 exit code unreliable across platforms without explicit verification
+    controls:
+      - MeasureDeployer checks returncode and logs stderr
+      - Post-deploy: query XMLA endpoint to verify measure count matches expected
+    residual_D: 3
+    open: true
+    action: >
+      Add post-deploy verification: query Information_Schema.MEASURE_NAME via XMLA
+      and assert count >= expected. Until then, manual verification required after
+      every deploy in CI environment.
+
+  - id: FM-09
+    name: Plausible numbers, wrong labels (correct magnitude, wrong KPI name in prose)
+    example: "'Cost grew 12%' when it's revenue that grew 12%"
+    effect: Decision made on correct number attributed to wrong driver
+    S: 7
+    O: 4  # Claude can transpose subject/object in complex sentences
+    D: 9  # No current control catches label↔number transposition
+    controls:
+      - None currently implemented
+    residual_D: 9
+    residual_RPN_note: "7 × 4 × 9 = 252 — equal to FM-02, currently unmitigated"
+    open: true
+    action: >
+      Future: structured key_findings format requiring (kpi_name, direction, value) tuples
+      rather than free prose. Low priority until FM-02 and FM-06 are closed.
+
+summary:
+  high_rpn_open:
+    - FM-01  # 144 — number magnitude
+    - FM-02  # 252 — fabricated root cause
+    - FM-06  # 135 — wrong DAX filter context
+    - FM-07  # pending DPA
+    - FM-09  # 252 — label transposition, unmitigated
+
+  acceptance_gate: >
+    RPN > 100 with open=true means the failure mode is not controlled to an
+    acceptable level. The pipeline must not be used for automated delivery to
+    paying clients until all open high-RPN modes have confirmed mitigations.
+    Current status: FM-02, FM-09 remain open with RPN > 200.

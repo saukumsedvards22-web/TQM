@@ -37,32 +37,74 @@ You receive month-over-month KPI data and write a concise, insightful \
 monthly commentary that a non-technical CEO or CFO can act on.
 
 ## Output Format
-Return structured JSON with exactly these keys:
+Return structured JSON with EXACTLY these keys — no extras, no omissions:
 {
-  "headline": "One sentence capturing the single most important thing this month",
-  "executive_summary": "2-3 sentences. What changed and why it matters.",
+  "headline": "One sentence. Must include the single largest KPI movement with exact % and direction.",
+  "executive_summary": "2-3 sentences. What changed and why it matters. Every % cited must appear in the data.",
   "key_findings": [
-    "Finding 1 — specific, numbers included",
+    "Finding 1 — MUST include the exact KPI name and exact % change from the data",
     "Finding 2",
-    "Finding 3 (max 5)"
+    "Finding 3 (max 5 findings)"
   ],
-  "root_cause_analysis": "1-2 paragraphs. WHY things changed — seasonality, market, ops?",
-  "risks": ["Risk 1", "Risk 2"],
-  "opportunities": ["Opportunity 1", "Opportunity 2"],
+  "root_cause_analysis": {
+    "claims": [
+      {
+        "claim": "Exact causal statement — no hedging",
+        "evidence_kpi": "kpi_name from the data that supports this claim",
+        "evidence_value": "the exact number from the data (e.g. '-23.4%')"
+      }
+    ],
+    "unsupported_factors": ["factor 1 — things you believe are causal but cannot prove from the data alone"]
+  },
+  "risks": ["Risk 1 — grounded in a specific KPI or trend", "Risk 2"],
+  "opportunities": ["Opportunity 1 — grounded in a specific KPI or trend"],
   "recommended_actions": [
     {"action": "Do X", "owner": "CFO/CEO/Sales", "deadline": "next 30 days"}
   ],
-  "outlook": "One sentence forecast for next month."
+  "outlook": "One sentence forecast. If insufficient data for a confident forecast, say exactly that."
 }
 
-## Rules
-- Always cite specific numbers (e.g. "Revenue grew 12.4% to €847k").
-- Never make up numbers not present in the data.
-- Write in plain English. No jargon. No buzzwords.
-- Be direct and confident. CEOs don't want hedged non-answers.
-- If a change is within ±3% and there's no pattern, say it's stable.
-- Flag anything over ±15% as significant regardless of direction.
+## Absolute Rules
+1. Every % number in headline, executive_summary, or key_findings MUST appear verbatim in the input data.
+   Do not round, estimate, or infer percentages that aren't in the data.
+2. root_cause_analysis.claims: every claim requires an evidence_kpi and evidence_value from the data.
+   If you cannot provide evidence, the claim belongs in unsupported_factors, not claims.
+3. If a change is within ±3%, write "stable" — do not manufacture an explanation.
+4. No hedging language anywhere: "may have", "could be", "appears to", "suggests", "in line with",
+   "consistent with", "trends indicate" — these are forbidden. State the fact or stay silent.
+5. Never cite a number that does not appear in the JSON data you were given.
 """
+
+
+@dataclass
+class RootCauseClaim:
+    """A single causal claim grounded in a specific KPI."""
+    claim: str
+    evidence_kpi: str
+    evidence_value: str
+
+
+@dataclass
+class RootCauseAnalysis:
+    """Structured root cause analysis with verifiable citations."""
+    claims: list[RootCauseClaim]
+    unsupported_factors: list[str]
+
+    def citation_count(self) -> int:
+        return len(self.claims)
+
+    def to_prose(self) -> str:
+        parts = []
+        for c in self.claims:
+            parts.append(f"{c.claim} ({c.evidence_kpi}: {c.evidence_value})")
+        if self.unsupported_factors:
+            parts.append("Possible contributing factors (unverified from data): " + "; ".join(self.unsupported_factors))
+        return " ".join(parts) if parts else "[No causal claims could be grounded in the data.]"
+
+    @classmethod
+    def from_string_fallback(cls, text: str) -> "RootCauseAnalysis":
+        """Create from a plain string when Claude returns the old format."""
+        return cls(claims=[], unsupported_factors=[text])
 
 
 @dataclass
@@ -70,7 +112,7 @@ class AICommentary:
     headline: str
     executive_summary: str
     key_findings: list[str]
-    root_cause_analysis: str
+    root_cause_analysis: RootCauseAnalysis
     risks: list[str]
     opportunities: list[str]
     recommended_actions: list[dict]
@@ -87,7 +129,13 @@ class AICommentary:
         ]
         for finding in self.key_findings:
             lines.append(f"- {finding}")
-        lines.append(f"\n## Root Cause Analysis\n{self.root_cause_analysis}")
+        lines.append("\n## Root Cause Analysis")
+        for claim in self.root_cause_analysis.claims:
+            lines.append(f"- {claim.claim} *(Source: {claim.evidence_kpi} = {claim.evidence_value})*")
+        if self.root_cause_analysis.unsupported_factors:
+            lines.append("\n*Possible contributing factors (not verifiable from data):*")
+            for f in self.root_cause_analysis.unsupported_factors:
+                lines.append(f"  - {f}")
         if self.risks:
             lines.append("\n## Risks")
             for r in self.risks:
@@ -203,7 +251,10 @@ class AIAnalyst:
                 "has reviewed and completed the narrative."
             ),
             key_findings=bullet_lines or ["No KPI data available."],
-            root_cause_analysis="[NOT GENERATED — AI API UNAVAILABLE]",
+            root_cause_analysis=RootCauseAnalysis(
+                claims=[],
+                unsupported_factors=["[NOT GENERATED — AI API UNAVAILABLE]"],
+            ),
             risks=["AI commentary could not be generated — verify API status before next run."],
             opportunities=[],
             recommended_actions=[
@@ -229,14 +280,35 @@ class AIAnalyst:
             if match:
                 data = json.loads(match.group())
             else:
-                # Fallback — treat whole response as executive summary
                 data = {"executive_summary": raw}
+
+        rca_raw = data.get("root_cause_analysis", {})
+        if isinstance(rca_raw, dict):
+            claims = [
+                RootCauseClaim(
+                    claim=c.get("claim", ""),
+                    evidence_kpi=c.get("evidence_kpi", ""),
+                    evidence_value=c.get("evidence_value", ""),
+                )
+                for c in rca_raw.get("claims", [])
+            ]
+            unsupported = rca_raw.get("unsupported_factors", [])
+            rca = RootCauseAnalysis(claims=claims, unsupported_factors=unsupported)
+        else:
+            # Claude returned the old string format — treat as unsupported
+            rca = RootCauseAnalysis.from_string_fallback(str(rca_raw))
+
+        if rca.citation_count() == 0:
+            log.warning(
+                "root_cause_analysis contains zero verifiable citations. "
+                "All claims are in unsupported_factors — review gate will flag this."
+            )
 
         return AICommentary(
             headline=data.get("headline", ""),
             executive_summary=data.get("executive_summary", ""),
             key_findings=data.get("key_findings", []),
-            root_cause_analysis=data.get("root_cause_analysis", ""),
+            root_cause_analysis=rca,
             risks=data.get("risks", []),
             opportunities=data.get("opportunities", []),
             recommended_actions=data.get("recommended_actions", []),
