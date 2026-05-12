@@ -29,6 +29,7 @@ via the CLI (tqm dax golden-verify) or Tabular Editor CLI.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,13 @@ import yaml
 
 log = logging.getLogger(__name__)
 
-TOLERANCE_PCT = 0.1  # 0.1% — tighter than reconciliation; this is math not prose
+TOLERANCE_PCT = 0.1  # 0.1% relative — for currency / count measures
+TOLERANCE_ABS_DEFAULT_PP = 0.05  # 0.05 percentage points — for ratio / % measures
+
+# Heuristic: measure names matching these are ratios where absolute tolerance is the right unit.
+# Relative 0.1% on a margin of 12.4% means tolerance ≈ 0.0124pp — absurdly tight.
+# Absolute 0.05pp on the same measure is the realistic floor (DAX rounding alone uses more).
+_RATIO_NAME_PATTERNS = re.compile(r"(%|pct|percent|rate|ratio|margin|share|coverage|conversion)", re.I)
 
 
 @dataclass
@@ -46,7 +53,9 @@ class GoldenValue:
     filter_context: str        # plain-English description e.g. "All data, no filter"
     dax_filter: str            # e.g. "ALL(sales)" or "sales[region] = \"Rīga\""
     expected_value: float
-    tolerance_pct: float = TOLERANCE_PCT
+    # Exactly ONE of these should be set. tolerance_abs takes precedence if both present.
+    tolerance_pct: float = TOLERANCE_PCT      # relative %, used for currency/count measures
+    tolerance_abs: float | None = None        # absolute, in measure's own units (pp for ratios)
     notes: str = ""
 
 
@@ -144,6 +153,7 @@ class GoldenSuite:
                     "dax_filter": t.dax_filter,
                     "expected_value": t.expected_value,
                     "tolerance_pct": t.tolerance_pct,
+                    "tolerance_abs": t.tolerance_abs,
                     "notes": t.notes,
                 }
                 for t in self.tests
@@ -196,12 +206,22 @@ class GoldenSuite:
                 ))
                 continue
 
-            if test.expected_value == 0:
-                deviation_pct = abs(actual) * 100  # anything non-zero is infinite deviation
+            # Choose tolerance band: absolute takes precedence, else relative %
+            abs_diff = abs(actual - test.expected_value)
+            if test.tolerance_abs is not None:
+                passed = abs_diff <= test.tolerance_abs
+                # deviation_pct reported for display only
+                if test.expected_value == 0:
+                    deviation_pct = abs_diff * 100
+                else:
+                    deviation_pct = abs_diff / abs(test.expected_value) * 100
             else:
-                deviation_pct = abs(actual - test.expected_value) / abs(test.expected_value) * 100
-
-            passed = deviation_pct <= test.tolerance_pct
+                if test.expected_value == 0:
+                    deviation_pct = abs(actual) * 100  # anything non-zero = infinite relative deviation
+                    passed = abs(actual) <= test.tolerance_pct  # interpret as absolute when expected is 0
+                else:
+                    deviation_pct = abs_diff / abs(test.expected_value) * 100
+                    passed = deviation_pct <= test.tolerance_pct
             results.append(GoldenTestResult(
                 measure_name=test.measure_name,
                 filter_context=test.filter_context,
@@ -253,17 +273,27 @@ class GoldenSuite:
 
         Call compare(allow_unsigned=True) for dry-run testing only.
         """
-        tests = [
-            GoldenValue(
-                measure_name=name,
-                filter_context="All data, no filter",
-                dax_filter="",
-                expected_value=value,
-                tolerance_pct=tolerance_pct,
-                notes="Bootstrap — verify manually before treating as authoritative",
-            )
-            for name, value in measure_actuals.items()
-        ]
+        tests: list[GoldenValue] = []
+        for name, value in measure_actuals.items():
+            if _RATIO_NAME_PATTERNS.search(name):
+                # Ratio/percentage measure → absolute tolerance in pp
+                tests.append(GoldenValue(
+                    measure_name=name,
+                    filter_context="All data, no filter",
+                    dax_filter="",
+                    expected_value=value,
+                    tolerance_abs=TOLERANCE_ABS_DEFAULT_PP,
+                    notes=f"Auto-classified as ratio measure (tolerance_abs={TOLERANCE_ABS_DEFAULT_PP}pp). Verify manually.",
+                ))
+            else:
+                tests.append(GoldenValue(
+                    measure_name=name,
+                    filter_context="All data, no filter",
+                    dax_filter="",
+                    expected_value=value,
+                    tolerance_pct=tolerance_pct,
+                    notes="Bootstrap — verify manually before treating as authoritative.",
+                ))
         from datetime import datetime, timezone
         signoff = GoldenSignoff(
             seeded_by=seeded_by,

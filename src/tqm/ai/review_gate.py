@@ -78,19 +78,27 @@ class ReviewGate:
         self,
         volatility_profile: "VolatilityProfile | None" = None,
         static_fallback_pct: float = 15.0,
+        flat_threshold_pct: float = 3.0,    # |pct| below this → "flat"; configurable per client
         mode: Literal["interactive", "pending_file", "raise"] = "raise",
         pending_dir: Path = Path("output/pending"),
+        synonym_table: "object | None" = None,    # SynonymTable; deferred import
         # kept for backward-compat with CLI — ignored when profile present
         delta_block_pct: float | None = None,
     ) -> None:
         self.volatility_profile = volatility_profile
         self.static_fallback_pct = static_fallback_pct
-        # CLI override: explicit delta_block_pct overrides static fallback
+        self.flat_threshold_pct = flat_threshold_pct
+        self._synonym_table = synonym_table
         if delta_block_pct is not None:
             self.static_fallback_pct = delta_block_pct
         self.mode = mode
         self.pending_dir = pending_dir
         self._reconciler = NumberReconciler()
+
+    def _direction_from_pct(self, pct: float) -> str:
+        if abs(pct) < self.flat_threshold_pct:
+            return "flat"
+        return "up" if pct > 0 else "down"
 
     # ------------------------------------------------------------------
     # Public API
@@ -198,16 +206,12 @@ class ReviewGate:
           3. magnitude_pct must match |source pct| within 2pp
           4. context must NOT mention any other KPI name (label transposition)
         """
+        from .kpi_synonyms import SynonymTable
+        synonym_table = getattr(self, "_synonym_table", None) or SynonymTable()
+
         flags: list[ReviewFlag] = []
         kpi_deltas = comparison.kpi_deltas()
         known_kpis = set(kpi_deltas.keys())
-        # Lowercase variants of KPI names — for context-leak detection
-        kpi_name_tokens = {
-            tok.lower()
-            for kpi in known_kpis
-            for tok in kpi.replace("_", " ").split()
-            if len(tok) > 3  # skip "of", "by"
-        }
 
         for i, finding in enumerate(commentary.key_findings):
             if not finding.kpi_id:
@@ -229,7 +233,7 @@ class ReviewGate:
                 continue
 
             source_pct = kpi_deltas[finding.kpi_id]["pct"]
-            source_direction = "flat" if abs(source_pct) < 3 else ("up" if source_pct > 0 else "down")
+            source_direction = self._direction_from_pct(source_pct)
 
             if finding.direction != source_direction:
                 flags.append(ReviewFlag(
@@ -253,18 +257,13 @@ class ReviewGate:
                         ),
                     ))
 
-            # Context-leak check: any OTHER kpi name mentioned in context = label transposition risk
+            # Semantic leak check via synonym table (FM-09 belt-and-braces)
             if finding.context:
-                ctx_lower = finding.context.lower()
-                this_kpi_tokens = {
-                    tok.lower()
-                    for tok in finding.kpi_id.replace("_", " ").split()
-                    if len(tok) > 3
-                }
-                leaked = {
-                    tok for tok in kpi_name_tokens
-                    if tok in ctx_lower and tok not in this_kpi_tokens
-                }
+                leaked = synonym_table.find_leaks(
+                    this_kpi_id=finding.kpi_id,
+                    all_kpi_ids=known_kpis,
+                    context=finding.context,
+                )
                 if leaked:
                     flags.append(ReviewFlag(
                         severity="block",
@@ -351,14 +350,17 @@ class ReviewGate:
             said_grew = bool(re.search(r"\b(grew|increased|up|higher|rose|gain)\b", text))
             said_fell = bool(re.search(r"\b(fell|declined|dropped|down|lower|decrease|loss)\b", text))
 
-            if actual_up and said_fell:
+            # Only flag when ONE direction word appears unambiguously.
+            # Mixed wording (e.g. "revenue rose; costs fell") is normal prose
+            # and is now caught precisely by _check_key_findings per-KPI.
+            if actual_up and said_fell and not said_grew:
                 flags.append(ReviewFlag(
                     severity="block",
                     code="DIRECTION_CONFLICT",
                     message=f"Commentary says revenue fell but {kpi} is {delta['pct']:+.1f}%",
                     detail="Claude likely hallucinated the narrative direction.",
                 ))
-            elif not actual_up and said_grew:
+            elif not actual_up and said_grew and not said_fell:
                 flags.append(ReviewFlag(
                     severity="block",
                     code="DIRECTION_CONFLICT",

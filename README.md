@@ -196,6 +196,25 @@ Before sending any client data to the Anthropic API:
 3. Consider hashing customer names in the prompt context (`customer_hash` instead of `"Rimi Latvia"`)
 4. Data does not leave the EU under Anthropic's EU endpoint — confirm region is set correctly
 
+### Operational documents
+
+- [`docs/analyst_hiring.md`](docs/analyst_hiring.md) — Role spec for the second-analyst verification position. Required for `GoldenSuite` signoff. Defines independence, compensation that doesn't create rubber-stamp pressure, and turnover handling.
+- [`docs/clean_month.md`](docs/clean_month.md) — Seven-criterion definition of a clean month. Required for Spot-Check tier eligibility. Includes the `ClientCorrection` schema, the rolling-window rule, and the retroactive-downgrade policy.
+
+### Gate verification
+
+```bash
+# Mutation test: deliberately corrupt the baseline commentary in 10 ways
+# and verify the gate catches each.
+pytest tests/test_gate_mutations.py -v
+
+# Or as a one-shot CLI report (planned):
+# tqm mutate-gate
+```
+
+The mutation registry lives in `src/tqm/ai/mutations.py`. When you change the
+gate or the prompt, run this. A gate hole here is a release blocker.
+
 ---
 
 ## Why this beats a vanilla AI agency

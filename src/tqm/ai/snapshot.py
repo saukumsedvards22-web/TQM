@@ -91,16 +91,35 @@ class SnapshotComparison:
         ranked = sorted(deltas.items(), key=lambda x: abs(x[1]["pct"]), reverse=True)
         return [(k, v["pct"]) for k, v in ranked[:n]]
 
-    def to_prompt_context(self) -> str:
-        """Serialise comparison to a compact JSON string for the AI prompt."""
+    def to_prompt_context(self, sanitize: bool = True) -> str:
+        """Serialise comparison to a compact JSON string for the AI prompt.
+
+        sanitize=True applies the prompt-injection sanitizer to all string
+        values (customer names, segment labels, etc.). Disable only for
+        debugging or unit tests that need raw output.
+        """
+        payload: dict = {
+            "period": self.period_label,
+            "kpi_deltas": self.kpi_deltas(),
+            "top_movers": self.top_movers(),
+            "current_breakdowns": self.current.dimension_breakdowns,
+            "previous_breakdowns": self.previous.dimension_breakdowns,
+        }
+
+        if sanitize:
+            from .sanitizer import PromptSanitizer
+            sanitized, redactions = PromptSanitizer().sanitize_dict(payload)
+            if redactions:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Prompt sanitizer redacted %d field(s): %s",
+                    len(redactions), redactions[:5],
+                )
+                sanitized["_sanitizer_redactions"] = redactions
+            payload = sanitized
+
         return json.dumps(
-            {
-                "period": self.period_label,
-                "kpi_deltas": self.kpi_deltas(),
-                "top_movers": self.top_movers(),
-                "current_breakdowns": self.current.dimension_breakdowns,
-                "previous_breakdowns": self.previous.dimension_breakdowns,
-            },
+            payload,
             indent=2,
             ensure_ascii=False,
         )
