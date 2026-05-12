@@ -225,6 +225,10 @@ def deploy(
 @click.option("--format", "fmt", type=click.Choice(["html", "pdf", "md", "all"]), default="all")
 @click.option("--email-to", multiple=True, help="Email addresses to send report to")
 @click.option("--api-key", default=None, envvar="ANTHROPIC_API_KEY")
+@click.option("--dry-run", is_flag=True, help="Generate report but do not email. Writes to output-dir.")
+@click.option("--require-approval", is_flag=True, default=True, help="Block delivery on anomalies (default: on)")
+@click.option("--delta-block-pct", default=40.0, show_default=True, help="% change that blocks delivery for review")
+@click.option("--expected-period", default=None, help="Expected period for date validation e.g. 2024-03")
 @click.pass_context
 def report(
     ctx: click.Context,
@@ -236,54 +240,118 @@ def report(
     fmt: str,
     email_to: tuple[str, ...],
     api_key: str | None,
+    dry_run: bool,
+    require_approval: bool,
+    delta_block_pct: float,
+    expected_period: str | None,
 ) -> None:
-    """Generate a monthly AI commentary report from two months of data."""
+    """Generate a monthly AI commentary report from two months of data.
+
+    Runs schema drift detection, date column validation, AI review gate,
+    and cost tracking before any delivery. Use --dry-run to generate
+    without emailing.
+    """
     from .ingestion import ExcelIngester, SAPIngester
-    from .schema import SchemaDetector
-    from .ai import AIAnalyst, MonthlySnapshot, SnapshotComparison
+    from .schema import SchemaDetector, SchemaDriftDetector, DateColumnValidator
+    from .ai import AIAnalyst, MonthlySnapshot, SnapshotComparison, ReviewGate, ReviewBlockedError, CostTracker
     from .reporting import ReportRenderer
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    cost_tracker = CostTracker(log_path=out / ".tqm_costs.jsonl")
+    drift_detector = SchemaDriftDetector(schema_dir=out / ".tqm_schemas")
 
     def _ingest(fp: str):
         p = Path(fp)
         ingester = SAPIngester() if p.suffix.lower() in {".txt", ".csv"} else ExcelIngester()
         return ingester.ingest(p)
 
-    console.print("[bold]Ingesting current period…[/bold]")
+    # ── 1. Ingest ────────────────────────────────────────────────────
+    console.print("[bold]Step 1/5:[/bold] Ingesting data…")
     cur_result = _ingest(current_file)
-    console.print("[bold]Ingesting previous period…[/bold]")
     prev_result = _ingest(previous_file)
 
     model_cur = SchemaDetector().detect(cur_result.tables)
     model_prev = SchemaDetector().detect(prev_result.tables)
 
     fact = model_cur.fact
+
+    # ── 2. Schema drift check ────────────────────────────────────────
+    console.print("[bold]Step 2/5:[/bold] Checking schema drift…")
+    drift_report = drift_detector.check(fact.df, client_name)
+    if drift_report.has_blockers:
+        console.print(f"[red bold]SCHEMA DRIFT DETECTED — aborting[/red bold]\n{drift_report.summary()}")
+        sys.exit(1)
+    elif not drift_report.is_clean:
+        console.print(f"[yellow]{drift_report.summary()}[/yellow]")
+    else:
+        console.print("[green]✓[/green] Schema unchanged")
+
+    # ── 3. Date column validation ────────────────────────────────────
+    console.print("[bold]Step 3/5:[/bold] Validating date column…")
     date_cols = fact.date_column_names
     measure_cols = fact.measure_names
     dim_cols = [d.name for d in fact.dimension_columns]
 
-    # Derive period labels from file names
+    date_validator = DateColumnValidator(expected_period=expected_period)
+    if date_cols:
+        chosen_date, date_result = date_validator.pick_best_date_column(fact.df, date_cols)
+        if date_result and not date_result.passed:
+            console.print(f"[red bold]DATE VALIDATION FAILED:[/red bold]\n{date_result.summary()}")
+            if any(i.severity == "block" for i in date_result.issues):
+                console.print("[red]Time-intelligence measures will be wrong. Aborting.[/red]")
+                sys.exit(1)
+    else:
+        chosen_date = None
+        console.print("[yellow]⚠[/yellow] No date column found — time-intelligence measures will be unavailable")
+
+    # ── 4. Build snapshots + AI commentary ──────────────────────────
+    console.print("[bold]Step 4/5:[/bold] Generating AI commentary…")
     cur_period = Path(current_file).stem
     prev_period = Path(previous_file).stem
 
     snap_cur = MonthlySnapshot.from_dataframe(
-        fact.df, date_cols[0] if date_cols else "", measure_cols, dim_cols, cur_period
+        fact.df, chosen_date or "", measure_cols, dim_cols, cur_period
     )
     snap_prev = MonthlySnapshot.from_dataframe(
-        model_prev.fact.df, date_cols[0] if date_cols else "", measure_cols, dim_cols, prev_period
+        model_prev.fact.df, chosen_date or "", measure_cols, dim_cols, prev_period
     )
-
     comparison = SnapshotComparison(current=snap_cur, previous=snap_prev)
 
-    console.print("[bold]Generating AI commentary…[/bold]")
     analyst = AIAnalyst(
         api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
         client_profile=client_profile,
     )
-    commentary = analyst.analyse(comparison)
+    commentary = analyst.analyse(comparison, cost_tracker=cost_tracker, client_name=client_name)
+    cost_tracker.print_session_summary()
     console.print(Panel(commentary.headline, title="AI Headline"))
+
+    # ── 5. Review gate ───────────────────────────────────────────────
+    console.print("[bold]Step 5/5:[/bold] Running review gate…")
+    gate_mode = "interactive" if (email_to and not dry_run) else "pending_file"
+    gate = ReviewGate(
+        delta_block_pct=delta_block_pct,
+        mode=gate_mode,
+        pending_dir=out / "pending",
+    )
+    review_result = gate.check(commentary, comparison, client_name)
+
+    if not review_result.passed:
+        console.print(f"[red bold]REVIEW GATE BLOCKED — {len(review_result.blockers)} issue(s)[/red bold]")
+        for flag in review_result.blockers:
+            console.print(f"  🔴 [{flag.code}] {flag.message}")
+            if flag.detail:
+                console.print(f"       {flag.detail}")
+
+        if email_to and not dry_run and require_approval:
+            approved = gate.require_human_approval(review_result, commentary, comparison, client_name)
+            if not approved:
+                console.print("[red]Delivery cancelled by reviewer.[/red]")
+                sys.exit(1)
+            console.print("[green]✓[/green] Approved by reviewer")
+        elif not dry_run and require_approval:
+            console.print("[yellow]Report saved to pending/ — review before delivering.[/yellow]")
 
     renderer = ReportRenderer()
     safe_name = client_name.replace(" ", "_").lower()
@@ -303,7 +371,7 @@ def report(
         renderer.render_markdown(commentary, comparison, client_name, md_path)
         console.print(f"[green]✓[/green] MD   → {md_path}")
 
-    if email_to:
+    if email_to and not dry_run:
         from .reporting import ReportEmailer
 
         smtp_host = os.getenv("SMTP_HOST", "")
@@ -325,6 +393,12 @@ def report(
                 pdf_path=pdf_p,
             )
             console.print(f"[green]✓[/green] Report emailed to {', '.join(email_to)}")
+    elif dry_run and email_to:
+        console.print(f"[yellow]DRY RUN — would email {', '.join(email_to)} but delivery skipped[/yellow]")
+
+    # Update schema fingerprint after successful run
+    drift_detector.update(fact.df, client_name)
+    console.print(f"[dim]Schema fingerprint updated. Cost this run: {cost_tracker.monthly_summary(client_name)}[/dim]")
 
 
 # ──────────────────────────────────────────────

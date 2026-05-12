@@ -2,5 +2,6 @@
 
 from .generator import DAXGenerator
 from .measures import DAXMeasure, DAXMeasureSet
+from .validator import DAXValidator, DAXValidationResult
 
-__all__ = ["DAXGenerator", "DAXMeasure", "DAXMeasureSet"]
+__all__ = ["DAXGenerator", "DAXMeasure", "DAXMeasureSet", "DAXValidator", "DAXValidationResult"]

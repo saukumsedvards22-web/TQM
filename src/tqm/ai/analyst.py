@@ -7,13 +7,24 @@ so repeated monthly calls are fast and cheap.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
+from typing import Any
 
 import anthropic
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .snapshot import SnapshotComparison
 
 log = logging.getLogger(__name__)
+
+# Exceptions that warrant a retry vs ones that are permanent failures
+_RETRYABLE = (
+    anthropic.APIConnectionError,
+    anthropic.APITimeoutError,
+    anthropic.InternalServerError,
+    anthropic.RateLimitError,
+)
 
 # Cached system prompt — injected once per session, cached by Anthropic
 _ANALYST_SYSTEM_PROMPT = """\
@@ -102,7 +113,18 @@ class AIAnalyst:
         self.client = anthropic.Anthropic(api_key=api_key)
         self.client_profile = client_profile
 
-    def analyse(self, comparison: SnapshotComparison) -> AICommentary:
+    def analyse(
+        self,
+        comparison: SnapshotComparison,
+        cost_tracker: Any | None = None,
+        client_name: str = "",
+    ) -> AICommentary:
+        """Generate commentary with retry on transient API failures.
+
+        If all retries are exhausted, returns a safe fallback commentary
+        containing the raw KPI data so the human reviewer can write the
+        narrative themselves — we never silently swallow the error.
+        """
         system_blocks: list[dict] = [
             {
                 "type": "text",
@@ -126,17 +148,70 @@ class AIAnalyst:
         )
 
         log.info("Generating AI commentary for %s…", comparison.period_label)
-        response = self.client.messages.create(
+
+        try:
+            response = self._call_with_retry(system_blocks, user_message)
+        except Exception as exc:
+            log.error("All retries exhausted for AI commentary: %s", exc)
+            return self._fallback_commentary(comparison)
+
+        raw = response.content[0].text  # type: ignore[union-attr]
+        log.debug("Cache read tokens: %s", getattr(response.usage, "cache_read_input_tokens", "n/a"))
+
+        if cost_tracker is not None:
+            cost_tracker.record(
+                client_name=client_name,
+                period=comparison.current.period,
+                step="ai_commentary",
+                model=self.MODEL,
+                usage=response.usage,
+            )
+
+        return self._parse(raw, comparison.period_label)
+
+    @retry(
+        retry=retry_if_exception_type(_RETRYABLE),
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=2, min=4, max=60),
+        reraise=True,
+    )
+    def _call_with_retry(self, system_blocks: list[dict], user_message: str) -> Any:
+        return self.client.messages.create(
             model=self.MODEL,
             max_tokens=2048,
             system=system_blocks,
             messages=[{"role": "user", "content": user_message}],
         )
 
-        raw = response.content[0].text  # type: ignore[union-attr]
-        log.debug("Cache tokens: %s", getattr(response.usage, "cache_read_input_tokens", "n/a"))
+    def _fallback_commentary(self, comparison: SnapshotComparison) -> AICommentary:
+        """Safe fallback when the API is unavailable.
 
-        return self._parse(raw, comparison.period_label)
+        Returns a commentary that is clearly marked as AI-unavailable
+        and contains the raw numbers so a human can complete it.
+        Crucially, it will be blocked by the ReviewGate before delivery.
+        """
+        deltas = comparison.kpi_deltas()
+        bullet_lines = []
+        for kpi, delta in list(deltas.items())[:5]:
+            bullet_lines.append(f"- {kpi}: {delta['current']:,.2f} ({delta['pct']:+.1f}% vs prior month)")
+
+        return AICommentary(
+            headline="[AI UNAVAILABLE — HUMAN REVIEW REQUIRED]",
+            executive_summary=(
+                "The AI commentary service was unavailable when this report was generated. "
+                "Raw KPI data is included below. Do not deliver this report until a human "
+                "has reviewed and completed the narrative."
+            ),
+            key_findings=bullet_lines or ["No KPI data available."],
+            root_cause_analysis="[NOT GENERATED — AI API UNAVAILABLE]",
+            risks=["AI commentary could not be generated — verify API status before next run."],
+            opportunities=[],
+            recommended_actions=[
+                {"action": "Complete narrative manually", "owner": "Analyst", "deadline": "Before delivery"}
+            ],
+            outlook="[NOT GENERATED]",
+            period_label=comparison.period_label,
+        )
 
     # ------------------------------------------------------------------
     # Parsing
