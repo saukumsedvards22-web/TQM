@@ -6,9 +6,13 @@ legitimately. The threshold must come from the data, not from a guess.
 
 Algorithm:
   - Maintain a rolling window of historical KPI snapshots (persisted as JSONL).
-  - Compute per-KPI rolling standard deviation over the window.
-  - Gate triggers at mean ± (N * stdev) — default N=2.5 (flagging ~1.2% of normal
-    observations as anomalies under a normal distribution assumption).
+  - Compute per-KPI threshold as median + N × MAD (median absolute deviation).
+    MAD is robust to outliers; mean+σ is not. Revenue/COGS monthly deltas are
+    fat-tailed and right-skewed — one bad month inflates σ and widens the
+    threshold precisely when it should stay tight.
+  - MAD converted to σ-equivalent via the standard consistency factor 1.4826
+    so that N=2.5 gives the same ~1.2% flag rate on a normal distribution, but
+    a single outlier in 12 months no longer dominates the threshold.
   - On first run (no history), use a conservative static fallback (15%).
   - Expose the computed thresholds so they appear in the audit log.
 
@@ -19,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,14 +33,17 @@ _MIN_HISTORY = 3               # minimum snapshots before volatility-based thres
 _DEFAULT_N_SIGMA = 2.5
 
 
+_MAD_CONSISTENCY_FACTOR = 1.4826  # makes MAD a consistent estimator of σ under normality
+
+
 @dataclass
 class KPIThreshold:
     kpi: str
     threshold_pct: float
-    method: str          # "volatility" | "static_fallback"
+    method: str          # "volatility_mad" | "static_fallback"
     history_count: int
-    mean_pct: float = 0.0
-    stdev_pct: float = 0.0
+    median_pct: float = 0.0
+    mad_pct: float = 0.0
 
 
 @dataclass
@@ -64,7 +70,7 @@ class VolatilityProfile:
             lines.append(
                 f"  {kpi}: ±{t.threshold_pct:.1f}%  "
                 f"(method={t.method}, n={t.history_count}, "
-                f"mean={t.mean_pct:.1f}%, stdev={t.stdev_pct:.1f}%)"
+                f"median={t.median_pct:.1f}%, mad={t.mad_pct:.1f}%)"
             )
         return "\n".join(lines)
 
@@ -127,20 +133,27 @@ class VolatilityTracker:
                 )
                 continue
 
-            mean = sum(deltas) / len(deltas)
-            variance = sum((d - mean) ** 2 for d in deltas) / len(deltas)
-            stdev = math.sqrt(variance)
+            sorted_deltas = sorted(deltas)
+            n = len(sorted_deltas)
+            mid = n // 2
+            median = (sorted_deltas[mid] if n % 2 else
+                      (sorted_deltas[mid - 1] + sorted_deltas[mid]) / 2.0)
+            abs_devs = sorted(abs(d - median) for d in deltas)
+            mad_raw = (abs_devs[n // 2] if n % 2 else
+                       (abs_devs[n // 2 - 1] + abs_devs[n // 2]) / 2.0)
+            # Scale MAD to σ-equivalent so n_sigma has consistent meaning
+            mad_sigma = mad_raw * _MAD_CONSISTENCY_FACTOR
 
             # Never set threshold below 5% regardless of how stable the history is
-            computed = max(abs(mean) + self.n_sigma * stdev, 5.0)
+            computed = max(abs(median) + self.n_sigma * mad_sigma, 5.0)
 
             thresholds[kpi] = KPIThreshold(
                 kpi=kpi,
                 threshold_pct=round(computed, 1),
-                method="volatility",
+                method="volatility_mad",
                 history_count=len(deltas),
-                mean_pct=round(mean, 2),
-                stdev_pct=round(stdev, 2),
+                median_pct=round(median, 2),
+                mad_pct=round(mad_sigma, 2),
             )
 
         log.info(VolatilityProfile(client_name=client_name, thresholds=thresholds).summary())

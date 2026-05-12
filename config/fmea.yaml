@@ -207,6 +207,86 @@ failure_modes:
       Add new mutations whenever a new failure mode is discovered.
       Run report via `tqm mutate-gate` after any gate or prompt change.
 
+  - id: FM-12
+    name: Source file unavailable or corrupt mid-extract
+    example: "Client uploads truncated SAP export; pipeline reads partial rows without error"
+    effect: >
+      KPI deltas computed on partial data; report numbers are wrong but plausible.
+      Gate may not catch it because partial data is internally consistent.
+    S: 8
+    O: 3  # Truncated files are common; most ingestors fail loudly on malformed rows
+    D: 7  # Partial file looks valid until you compare row count to previous month
+    controls:
+      - Row-count check: warn if current month has <70% of previous month's row count
+      - Source hash recorded in audit log (recomputable on dispute)
+      - SchemaDriftDetector catches column changes even in partial files
+    residual_D: 4
+    residual_RPN_note: "8 × 3 × 4 = 96 — below threshold with row-count check"
+    open: true
+    action: >
+      Add row_count_check to ingestion pipeline: if current_rows < 0.7 * previous_rows,
+      raise IngestionWarning and block automated delivery.
+      Add expected_row_count_approx to client config for cross-check.
+
+  - id: FM-13
+    name: Partial-month data when month-end shifts
+    example: >
+      Client extracts on 30th; December export runs to 31st.
+      MoM delta includes 31st for one month and only 30 days for next.
+    effect: >
+      Revenue appears to grow by ~3% from an extra day, not from real demand.
+      Commentary attributes the delta to a business driver that doesn't exist.
+    S: 6
+    O: 4  # Month-end extraction dates vary; December / 31-day months are systematic
+    D: 6  # Without explicit period_end validation, extra-day inflation is invisible
+    controls:
+      - DateColumnValidator records actual min/max dates in audit entry
+      - Comparison commentary includes period_days for both months
+      - Analyst review required for months where period_days differ by ≥2
+    residual_D: 3
+    residual_RPN_note: "6 × 4 × 3 = 72 — acceptable with period_days logged and analyst check"
+    open: true
+    action: >
+      Log period_days_current and period_days_previous in kpi_snapshot.
+      Gate warns (PERIOD_LENGTH_MISMATCH) if they differ by ≥2 days.
+      Analyst must acknowledge the warning before delivery.
+
+  - id: FM-14
+    name: API rate-limit or timeout beyond retry budget
+    example: "Anthropic returns 429 on report day; 4 retries exhausted; fallback ships"
+    effect: >
+      Fallback commentary is clearly marked; gate blocks delivery.
+      Operational failure: report is late. Client relationship risk if repeated.
+    S: 3  # Late delivery, not wrong data; fallback gate prevents silently bad output
+    O: 2  # Monthly window is narrow; 429s rare at current call volume
+    D: 1  # FALLBACK_COMMENTARY gate block is explicit; CostTracker logs the event
+    controls:
+      - 4-attempt exponential retry (2s, 4s, 8s, 16s) in analyst.py
+      - FALLBACK_COMMENTARY gate block prevents delivery
+      - CostTracker logs attempt count and failure reason
+      - Alert: analyst notified via log when all retries fail
+    residual_D: 1
+    residual_RPN_note: "3 × 2 × 1 = 6 — closed operationally; process alert covers it"
+    open: false
+
+  - id: FM-15
+    name: Cost runaway from retry storms
+    example: >
+      Bug causes infinite retry loop; 1,000 Claude API calls billed in one run.
+      At $15/MTok for Sonnet, a 10k-token prompt × 1,000 = $150 unexpected charge.
+    effect: >
+      Financial damage to TQM; not data quality issue, but operational integrity.
+    S: 5
+    O: 2  # Retry logic is bounded; loop bugs require two independent defects
+    D: 4  # Without a per-run spend cap, cost damage accumulates before detection
+    controls:
+      - tenacity retry is strictly bounded (max_attempts=4)
+      - CostTracker logs cumulative cost per run; warns above configurable threshold
+      - Recommend: set Anthropic usage limit in dashboard as a hard ceiling
+    residual_D: 2
+    residual_RPN_note: "5 × 2 × 2 = 20 — closed with bounded retry + cost logging"
+    open: false
+
 summary:
   high_rpn_open:
     - FM-01  # 144 — number magnitude in prose (closed by reconciler for findings; prose remains)
@@ -214,10 +294,14 @@ summary:
     - FM-06  # 135 — wrong DAX filter context, mitigated by golden tests (now with two-analyst signoff)
     - FM-07  # pending DPA
     - FM-10  # 135 — prompt injection, mitigated by sanitizer + structural framing
+    - FM-12  # 96 — partial source file; mitigated by row-count check (pending implementation)
+    - FM-13  # 72 — partial-month period mismatch; mitigated by period_days logging (pending)
 
   closed_since_last_review:
     - FM-09  # was 252, now 56 — closed by KeyFinding structural generation + gate checks
     - FM-11  # opened and closed in same pass — mutation tests on the gate
+    - FM-14  # 6 — API rate-limit; covered by bounded retry + fallback gate
+    - FM-15  # 20 — cost runaway; covered by bounded retry + CostTracker
 
   process_controls_documented:
     - FM-02  # docs/analyst_hiring.md — analyst-2 role with independence + comp structure

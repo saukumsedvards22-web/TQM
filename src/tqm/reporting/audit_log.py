@@ -1,25 +1,25 @@
 """Immutable audit log for every report run.
 
-Keyed by a deterministic report_id (sha256 of client+period+source hash).
+report_id is a composite identity, not a pure content hash:
+  sha256( client_name | period | source_data_hash | extraction_ts_utc | late_correction )
+
+This means:
+  - Two runs on the same data for the same period produce the same report_id
+    (deterministic replay for dispute resolution).
+  - A re-run on *corrected* data produces a new report_id because the source
+    hash differs. The new entry carries supersedes=<original_report_id> so the
+    correction chain is auditable without overwriting the original.
+  - late_correction=True in the id key signals the entry was generated after the
+    original delivery date — audit reviewers can filter these separately.
+
 Retained 12+ months. Append-only JSONL — never modify existing entries.
 
-Each entry captures:
-  - report_id        — deterministic, reproducible
-  - client_name / period
-  - source_data_hash — sha256 of the ingested DataFrame rows (not the file,
-                       which may be renamed/re-sent; the actual data content)
-  - prompt_hash      — sha256 of the user message sent to Claude
-  - response_hash    — sha256 of Claude's raw response
-  - kpi_snapshot     — the exact KPI deltas used for comparison
-  - gate_result      — pass/fail + all flags
-  - delivery         — where it was sent and when, or "held" / "dry_run"
-  - cost_eur         — API cost for this run
-
 When a client disputes a number four months later:
-  1. Look up report_id by client+period.
+  1. Look up report_id by client+period (returns most recent entry by default).
   2. Retrieve kpi_snapshot — these are the exact numbers the pipeline saw.
   3. Retrieve response_hash — verify Claude's response hasn't been altered.
   4. Re-run gate against stored kpi_snapshot to reproduce the review decision.
+  5. If supersedes is set, walk the chain to see the original and any corrections.
 """
 
 from __future__ import annotations
@@ -65,6 +65,8 @@ class AuditEntry:
     date_column_used: str
     schema_drift_clean: bool
     volatility_thresholds: dict  # kpi -> threshold_pct used
+    late_correction: bool = False  # re-run on corrected source data after original delivery
+    supersedes: str | None = None  # report_id of the entry this one replaces
 
     def to_dict(self) -> dict:
         return {
@@ -84,6 +86,8 @@ class AuditEntry:
             "date_column_used": self.date_column_used,
             "schema_drift_clean": self.schema_drift_clean,
             "volatility_thresholds": self.volatility_thresholds,
+            "late_correction": self.late_correction,
+            "supersedes": self.supersedes,
         }
 
 
@@ -113,8 +117,10 @@ class AuditLog:
         date_column_used: str,
         schema_drift_clean: bool,
         volatility_thresholds: dict,
+        late_correction: bool = False,
+        supersedes: str | None = None,
     ) -> AuditEntry:
-        report_id = self._make_id(client_name, period, source_df)
+        report_id = self._make_id(client_name, period, source_df, late_correction)
 
         entry = AuditEntry(
             report_id=report_id,
@@ -136,6 +142,8 @@ class AuditLog:
             date_column_used=date_column_used,
             schema_drift_clean=schema_drift_clean,
             volatility_thresholds=volatility_thresholds,
+            late_correction=late_correction,
+            supersedes=supersedes,
         )
 
         self._append(client_name, period, entry)
@@ -146,8 +154,38 @@ class AuditLog:
     # Reading
     # ------------------------------------------------------------------
 
-    def lookup(self, client_name: str, period: str) -> AuditEntry | None:
-        """Find an audit entry by client + period."""
+    def lookup(
+        self,
+        client_name: str,
+        period: str,
+        *,
+        include_corrections: bool = False,
+    ) -> AuditEntry | None:
+        """Return the most recent audit entry for client + period.
+
+        By default returns the latest entry (which may be a late correction).
+        Pass include_corrections=False and check .late_correction on the result
+        if you need to distinguish the original from re-runs.
+        """
+        year = period[:4] if len(period) >= 4 else datetime.now().strftime("%Y")
+        path = self._path(client_name, year)
+        if not path.exists():
+            return None
+        matches: list[AuditEntry] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                data = json.loads(line)
+                if data.get("client_name") == client_name and data.get("period") == period:
+                    matches.append(AuditEntry(**data))
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not matches:
+            return None
+        # Return the last-written entry (chronological order in append-only log)
+        return matches[-1]
+
+    def lookup_original(self, client_name: str, period: str) -> AuditEntry | None:
+        """Return the original (non-corrected) entry for client + period."""
         year = period[:4] if len(period) >= 4 else datetime.now().strftime("%Y")
         path = self._path(client_name, year)
         if not path.exists():
@@ -155,7 +193,9 @@ class AuditLog:
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
                 data = json.loads(line)
-                if data.get("client_name") == client_name and data.get("period") == period:
+                if (data.get("client_name") == client_name
+                        and data.get("period") == period
+                        and not data.get("late_correction", False)):
                     return AuditEntry(**data)
             except (json.JSONDecodeError, TypeError):
                 continue
@@ -178,8 +218,15 @@ class AuditLog:
     # Internals
     # ------------------------------------------------------------------
 
-    def _make_id(self, client_name: str, period: str, df: pd.DataFrame) -> str:
-        key = f"{client_name}|{period}|{_df_hash(df)}"
+    def _make_id(
+        self,
+        client_name: str,
+        period: str,
+        df: pd.DataFrame,
+        late_correction: bool = False,
+    ) -> str:
+        correction_flag = "corrected" if late_correction else "original"
+        key = f"{client_name}|{period}|{_df_hash(df)}|{correction_flag}"
         return _sha256(key)
 
     def _path(self, client_name: str, year: str) -> Path:

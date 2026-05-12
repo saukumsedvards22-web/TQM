@@ -39,7 +39,7 @@ def test_volatility_threshold_computed_after_sufficient_history(tmp_path):
     profile = tracker.compute_profile("acme")
     assert "total_qty" in profile.thresholds
     t = profile.thresholds["total_qty"]
-    assert t.method == "volatility"
+    assert t.method == "volatility_mad"
     assert t.history_count == 3
     assert t.threshold_pct >= 5.0  # never below floor
 
