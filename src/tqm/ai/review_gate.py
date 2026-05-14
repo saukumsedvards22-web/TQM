@@ -251,7 +251,7 @@ class ReviewGate:
     def _check_delta_magnitudes(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
         """Block on KPI changes beyond per-KPI volatility threshold."""
         flags: list[ReviewFlag] = []
-        for kpi, delta in comparison.kpi_deltas().items():
+        for kpi, delta in comparison.kpi_deltas.items():
             pct = abs(delta["pct"])
 
             if self.volatility_profile:
@@ -286,7 +286,7 @@ class ReviewGate:
         """Validate structured KeyFindings — closes FM-09.
 
         For each finding:
-          1. kpi_id must be a real key in comparison.kpi_deltas()
+          1. kpi_id must be a real key in comparison.kpi_deltas
           2. direction must match the sign of source pct
           3. magnitude_pct must match |source pct| within 2pp
           4. context must NOT mention any other KPI name (label transposition)
@@ -295,7 +295,7 @@ class ReviewGate:
         synonym_table = getattr(self, "_synonym_table", None) or SynonymTable()
 
         flags: list[ReviewFlag] = []
-        kpi_deltas = comparison.kpi_deltas()
+        kpi_deltas = comparison.kpi_deltas
         known_kpis = set(kpi_deltas.keys())
 
         for i, finding in enumerate(commentary.key_findings):
@@ -426,11 +426,11 @@ class ReviewGate:
         text = (commentary.headline + " " + commentary.executive_summary).lower()
 
         revenue_kpis = [
-            k for k in comparison.kpi_deltas()
+            k for k in comparison.kpi_deltas
             if any(x in k for x in ("revenue", "sales", "amount"))
         ]
         for kpi in revenue_kpis:
-            delta = comparison.kpi_deltas()[kpi]
+            delta = comparison.kpi_deltas[kpi]
             actual_up = delta["pct"] > 0
             said_grew = bool(re.search(r"\b(grew|increased|up|higher|rose|gain)\b", text))
             said_fell = bool(re.search(r"\b(fell|declined|dropped|down|lower|decrease|loss)\b", text))
@@ -456,7 +456,7 @@ class ReviewGate:
 
     def _check_round_numbers(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
         flags: list[ReviewFlag] = []
-        for kpi, delta in comparison.kpi_deltas().items():
+        for kpi, delta in comparison.kpi_deltas.items():
             for label, val in [("current", delta["current"]), ("previous", delta["previous"])]:
                 if _SUSPICIOUSLY_ROUND.search(f"{val:.1f}"):
                     flags.append(ReviewFlag(
@@ -502,7 +502,7 @@ class ReviewGate:
                 "unsupported_factors": commentary.root_cause_analysis.unsupported_factors,
                 "executive_summary": commentary.executive_summary,
             },
-            "kpi_deltas": comparison.kpi_deltas(),
+            "kpi_deltas": comparison.kpi_deltas,
         }
 
         if self.mode == "pending_file":
