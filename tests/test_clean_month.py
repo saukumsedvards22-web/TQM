@@ -173,6 +173,25 @@ def test_fallback_commentary_shipped_fails_clean(tmp_path):
 
 # ── Rolling window ────────────────────────────────────────────────────
 
+def test_report_delivered_next_month_still_counted(tmp_path):
+    """A July report generated on August 1st must count as a July delivery.
+
+    This is the normal case for a managed monthly service: the report is
+    generated after month-end close, often on the 1st or 2nd of the following
+    month. If we filter by generated_at instead of period, this entry is
+    silently missed and the month is marked as having no delivery (C5 fail).
+    """
+    audit = tmp_path / "audit"
+    corrections = tmp_path / "corrections"
+    # Period is "2024-07" but generated_at is in August
+    _make_audit_entry(audit, "Acme", "2024-07", "2024-08-01T09:00:00Z")
+
+    checker = CleanMonthChecker(audit_log_dir=audit, corrections_log_dir=corrections)
+    result = checker.check_month("Acme", "2024-07")
+    assert result.is_clean, f"Should be clean — failed: {result.failed_criteria}"
+    assert result.delivered_reports == 1
+
+
 def test_late_correction_fails_c4(tmp_path):
     """A late_correction rerun on a delivered period invalidates C4."""
     audit = tmp_path / "audit"

@@ -123,7 +123,9 @@ class CleanMonthChecker:
         result = CleanMonthResult(client_name=client_name, year_month=year_month, is_clean=False)
 
         all_entries = self.audit.history(client_name)
-        month_entries = [e for e in all_entries if e.generated_at.startswith(year_month)]
+        # Filter by period, not generated_at — a report for July delivered on
+        # August 1st has generated_at starting with "2024-08", not "2024-07".
+        month_entries = [e for e in all_entries if e.period == year_month]
         delivered = [e for e in month_entries if e.delivery.startswith("email:")]
         result.delivered_reports = len(delivered)
 
