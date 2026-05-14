@@ -429,5 +429,42 @@ def run(ctx: click.Context, config_file: str) -> None:
     )
 
 
+# ──────────────────────────────────────────────
+# mutate-gate
+# ──────────────────────────────────────────────
+
+@main.command("mutate-gate")
+@click.option("--json", "as_json", is_flag=True, help="Output results as JSON")
+def mutate_gate(as_json: bool) -> None:
+    """Verify the review gate catches every documented failure mode.
+
+    Runs the canonical mutation suite (MUTATIONS + COMPARISON_MUTATIONS) against
+    the gate and reports which failure modes are caught and which slip through.
+    Any uncaught mutation is a gate hole — fix before the next release.
+
+    Exit code 0 if all mutations caught; 1 if any gate hole detected.
+    """
+    from .ai.mutations import run_mutations
+
+    report = run_mutations()
+
+    if as_json:
+        import json as _json
+        console.print(_json.dumps({
+            "total": len(report.results),
+            "caught": len(report.results) - len(report.holes),
+            "holes": [
+                {"name": h.mutation.name, "expected": h.mutation.expected_block_code,
+                 "actual": h.actual_block_codes, "description": h.mutation.description}
+                for h in report.holes
+            ],
+        }, indent=2))
+    else:
+        console.print(report.text())
+
+    if not report.passed:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()

@@ -68,6 +68,19 @@ class AuditEntry:
     late_correction: bool = False  # re-run on corrected source data after original delivery
     supersedes: str | None = None  # report_id of the entry this one replaces
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "AuditEntry":
+        """Deserialize from a JSONL dict, tolerating unknown fields from future versions.
+
+        Fields present in data but absent from the dataclass are silently dropped.
+        Fields absent from data but present in the dataclass use their defaults.
+        This means old log entries (missing late_correction / supersedes) and
+        future log entries (with fields not yet in this version) both load cleanly.
+        """
+        import dataclasses
+        known = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
     def to_dict(self) -> dict:
         return {
             "report_id": self.report_id,
@@ -176,7 +189,7 @@ class AuditLog:
             try:
                 data = json.loads(line)
                 if data.get("client_name") == client_name and data.get("period") == period:
-                    matches.append(AuditEntry(**data))
+                    matches.append(AuditEntry.from_dict(data))
             except (json.JSONDecodeError, TypeError):
                 continue
         if not matches:
@@ -196,7 +209,7 @@ class AuditLog:
                 if (data.get("client_name") == client_name
                         and data.get("period") == period
                         and not data.get("late_correction", False)):
-                    return AuditEntry(**data)
+                    return AuditEntry.from_dict(data)
             except (json.JSONDecodeError, TypeError):
                 continue
         return None
@@ -209,7 +222,7 @@ class AuditLog:
             for line in path.read_text(encoding="utf-8").splitlines():
                 try:
                     data = json.loads(line)
-                    entries.append(AuditEntry(**data))
+                    entries.append(AuditEntry.from_dict(data))
                 except (json.JSONDecodeError, TypeError):
                     continue
         return entries
