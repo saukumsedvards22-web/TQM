@@ -16,6 +16,8 @@ import os
 import sys
 from pathlib import Path
 
+import re
+
 import click
 from dotenv import load_dotenv
 from rich.console import Console
@@ -26,6 +28,24 @@ from rich.table import Table
 load_dotenv()
 
 console = Console()
+
+
+def _parse_period(filepath: str) -> str:
+    """Extract YYYY-MM period from a filename stem.
+
+    Accepts separators _ or -:  sales_2024_03.csv → "2024-03"
+                                 acme-2024-03-data.xlsx → "2024-03"
+                                 2024_03.csv → "2024-03"
+
+    Falls back to the raw stem if no YYYY-MM pattern is found so the pipeline
+    still runs — period will just be non-standard and the clean-month checker
+    will not find it in its rolling window.
+    """
+    stem = Path(filepath).stem
+    m = re.search(r'(\d{4})[_\-](\d{2})(?:[_\-]|$)', stem)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    return stem
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -321,7 +341,23 @@ def report(
 
     date_validator = DateColumnValidator(expected_period=expected_period)
     if date_cols:
-        chosen_date, date_result = date_validator.pick_best_date_column(fact.df, date_cols)
+        try:
+            chosen_date, date_result = date_validator.pick_best_date_column(fact.df, date_cols)
+        except Exception as exc:
+            # DateAmbiguityError: multiple date columns pass validation.
+            # Surface this as a clear instruction, not a stack trace.
+            if "DateAmbiguityError" in type(exc).__name__ or "ambiguous" in str(exc).lower():
+                console.print(
+                    f"[red bold]DATE AMBIGUITY — aborting[/red bold]\n"
+                    f"{exc}\n\n"
+                    f"Set [bold]date_column[/bold] explicitly in your config or pass "
+                    f"[bold]--expected-period[/bold] to resolve ambiguity.\n"
+                    f"Candidates: {date_cols}"
+                )
+            else:
+                console.print(f"[red bold]DATE VALIDATION ERROR:[/red bold] {exc}")
+            sys.exit(1)
+
         if date_result and not date_result.passed:
             console.print(f"[red bold]DATE VALIDATION FAILED:[/red bold]\n{date_result.summary()}")
             if any(i.severity == "block" for i in date_result.issues):
@@ -333,8 +369,9 @@ def report(
 
     # ── 4. Build snapshots + AI commentary ──────────────────────────
     console.print("[bold]Step 4/5:[/bold] Generating AI commentary…")
-    cur_period = Path(current_file).stem
-    prev_period = Path(previous_file).stem
+    cur_period = _parse_period(current_file)
+    prev_period = _parse_period(previous_file)
+    console.print(f"[dim]Periods: {prev_period} → {cur_period}[/dim]")
 
     snap_cur = MonthlySnapshot.from_dataframe(
         fact.df, chosen_date or "", measure_cols, dim_cols, cur_period

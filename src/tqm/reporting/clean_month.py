@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -58,7 +59,7 @@ class CorrectionsLog:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, client_name: str) -> Path:
-        safe = client_name.lower().replace(" ", "_").replace("/", "_")
+        safe = re.sub(r'[^a-z0-9]+', '_', client_name.lower()).strip('_') or 'unknown'
         return self.log_dir / f"{safe}_corrections.jsonl"
 
     def log(self, correction: ClientCorrection) -> None:

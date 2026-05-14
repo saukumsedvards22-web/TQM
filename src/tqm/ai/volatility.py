@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -186,7 +187,7 @@ class VolatilityTracker:
     # ------------------------------------------------------------------
 
     def _path(self, client_name: str) -> Path:
-        safe = client_name.lower().replace(" ", "_").replace("/", "_")
+        safe = re.sub(r'[^a-z0-9]+', '_', client_name.lower()).strip('_') or 'unknown'
         return self.history_dir / f"{safe}_history.jsonl"
 
     def _load(self, client_name: str) -> list[dict]:

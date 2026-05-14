@@ -28,6 +28,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -222,7 +223,7 @@ class AuditLog:
     def history(self, client_name: str) -> list[AuditEntry]:
         """All audit entries for a client, all years, chronological."""
         entries: list[AuditEntry] = []
-        safe = client_name.lower().replace(" ", "_")
+        safe = re.sub(r'[^a-z0-9]+', '_', client_name.lower()).strip('_') or 'unknown'
         for path in sorted(self.log_dir.glob(f"{safe}_*.jsonl")):
             for line in path.read_text(encoding="utf-8").splitlines():
                 try:
@@ -248,7 +249,7 @@ class AuditLog:
         return _sha256(key)
 
     def _path(self, client_name: str, year: str) -> Path:
-        safe = client_name.lower().replace(" ", "_").replace("/", "_")
+        safe = re.sub(r'[^a-z0-9]+', '_', client_name.lower()).strip('_') or 'unknown'
         return self.log_dir / f"{safe}_{year}.jsonl"
 
     def _append(self, client_name: str, period: str, entry: AuditEntry) -> None:
