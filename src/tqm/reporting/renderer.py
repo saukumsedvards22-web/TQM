@@ -91,7 +91,7 @@ class ReportRenderer:
         lines.append("\n\n## KPI Summary\n")
         lines.append("| KPI | Current | Previous | Change |")
         lines.append("|-----|---------|----------|--------|")
-        for kpi, delta in comparison.kpi_deltas().items():
+        for kpi, delta in comparison.kpi_deltas.items():
             direction = "▲" if delta["pct"] > 0 else ("▼" if delta["pct"] < 0 else "–")
             lines.append(
                 f"| {kpi} | {delta['current']:,.2f} | {delta['previous']:,.2f} "
@@ -111,7 +111,7 @@ class ReportRenderer:
 
     def _build_kpi_cards(self, comparison: SnapshotComparison) -> list[KPICard]:
         cards: list[KPICard] = []
-        deltas = comparison.kpi_deltas()
+        deltas = comparison.kpi_deltas
 
         for kpi, delta in deltas.items():
             label = kpi.replace("_", " ").title()

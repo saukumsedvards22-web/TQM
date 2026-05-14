@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from functools import cached_property
 
 import pandas as pd
 
@@ -83,8 +84,9 @@ class SnapshotComparison:
     def period_label(self) -> str:
         return f"{self.current.period} vs {self.previous.period}"
 
-    def kpi_deltas(self) -> dict[str, dict[str, float]]:
-        """Compute absolute and % change for every shared KPI."""
+    @cached_property
+    def kpi_deltas(self) -> dict[str, dict[str, float]]:  # type: ignore[override]
+        """Compute absolute and % change for every shared KPI. Cached — computed once per instance."""
         deltas: dict[str, dict[str, float]] = {}
         for key in self.current.kpis:
             cur = self.current.kpis[key]
@@ -98,8 +100,7 @@ class SnapshotComparison:
 
     def top_movers(self, n: int = 5) -> list[tuple[str, float]]:
         """Return top N KPIs by absolute % change."""
-        deltas = self.kpi_deltas()
-        ranked = sorted(deltas.items(), key=lambda x: abs(x[1]["pct"]), reverse=True)
+        ranked = sorted(self.kpi_deltas.items(), key=lambda x: abs(x[1]["pct"]), reverse=True)
         return [(k, v["pct"]) for k, v in ranked[:n]]
 
     def to_prompt_context(self, sanitize: bool = True) -> str:
@@ -127,7 +128,7 @@ class SnapshotComparison:
 
         payload: dict = {
             "period": self.period_label,
-            "kpi_deltas": self.kpi_deltas(),
+            "kpi_deltas": self.kpi_deltas,
             "top_movers": self.top_movers(),
             "current_breakdowns": self.current.dimension_breakdowns,
             "previous_breakdowns": self.previous.dimension_breakdowns,

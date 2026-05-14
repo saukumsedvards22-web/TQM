@@ -93,7 +93,7 @@ class KeyFinding:
     "Cost grew 12%" when revenue moved 12% because it must commit to
     a specific kpi_id from the data. Rendering happens in code.
     """
-    kpi_id: str               # MUST be one of comparison.kpi_deltas() keys
+    kpi_id: str               # MUST be one of comparison.kpi_deltas keys
     direction: str            # "up" | "down" | "flat"
     magnitude_pct: float      # absolute % change, e.g. 12.4 for "12.4%"
     context: str = ""         # optional one-line context
@@ -285,7 +285,7 @@ class AIAnalyst:
         and contains the raw numbers so a human can complete it.
         Crucially, it will be blocked by the ReviewGate before delivery.
         """
-        deltas = comparison.kpi_deltas()
+        deltas = comparison.kpi_deltas
         findings: list[KeyFinding] = []
         for kpi, delta in list(deltas.items())[:5]:
             pct = delta["pct"]

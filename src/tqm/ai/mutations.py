@@ -38,7 +38,7 @@ def baseline_comparison() -> SnapshotComparison:
         period="2024-03",
         kpis={"total_revenue": 95600.0, "total_cost": 46000.0, "total_qty": 1050.0},
         row_count=1000,
-        period_days=31,
+        period_days=30,  # 1-day diff from previous — below warn threshold
     )
     prev = MonthlySnapshot(
         period="2024-02",

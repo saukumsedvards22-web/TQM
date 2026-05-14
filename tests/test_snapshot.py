@@ -18,7 +18,7 @@ def test_kpi_deltas_positive():
     cur = _make_snap("2024-03", 1200, 95000)
     prev = _make_snap("2024-02", 1000, 80000)
     comp = SnapshotComparison(current=cur, previous=prev)
-    deltas = comp.kpi_deltas()
+    deltas = comp.kpi_deltas
     assert deltas["total_qty"]["pct"] == pytest.approx(20.0)
     assert deltas["total_unit_price"]["pct"] == pytest.approx(18.75)
 
@@ -27,7 +27,7 @@ def test_kpi_deltas_negative():
     cur = _make_snap("2024-03", 800, 70000)
     prev = _make_snap("2024-02", 1000, 80000)
     comp = SnapshotComparison(current=cur, previous=prev)
-    deltas = comp.kpi_deltas()
+    deltas = comp.kpi_deltas
     assert deltas["total_qty"]["pct"] == pytest.approx(-20.0)
 
 

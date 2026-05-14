@@ -96,7 +96,7 @@ class NumberReconciler:
     def reconcile(self, commentary_text: str, comparison: SnapshotComparison) -> ReconciliationResult:
         """Main entry point. Check all numbers in commentary_text against comparison data."""
         extracted = self._extract_numbers(commentary_text)
-        kpi_deltas = comparison.kpi_deltas()
+        kpi_deltas = comparison.kpi_deltas
         kpi_absolutes = self._build_absolute_index(comparison)
 
         issues: list[ReconciliationIssue] = []
@@ -239,6 +239,6 @@ class NumberReconciler:
 
     def _build_absolute_index(self, comparison: SnapshotComparison) -> dict[str, list[float]]:
         index: dict[str, list[float]] = {}
-        for kpi, delta in comparison.kpi_deltas().items():
+        for kpi, delta in comparison.kpi_deltas.items():
             index[kpi] = [delta["current"], delta["previous"], delta["abs"]]
         return index

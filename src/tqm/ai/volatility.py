@@ -96,15 +96,37 @@ class VolatilityTracker:
     # ------------------------------------------------------------------
 
     def record(self, client_name: str, period: str, kpi_deltas: dict[str, dict]) -> None:
-        """Append this month's deltas to the history file."""
-        path = self._path(client_name)
-        record = {
+        """Append this month's deltas to the history file.
+
+        Idempotent: if this period is already recorded, the existing entry is
+        replaced in-memory and the file is rewritten. Duplicate periods arise
+        when a re-run corrects source data; keeping two entries for the same
+        period would double-count that month in the MAD calculation.
+        """
+        existing = self._load(client_name)
+        new_record = {
             "period": period,
             "deltas": {kpi: delta["pct"] for kpi, delta in kpi_deltas.items()},
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-        log.debug("Recorded %d KPI deltas for %s / %s", len(kpi_deltas), client_name, period)
+        # Replace any existing entry for this period; keep order stable
+        replaced = False
+        updated: list[dict] = []
+        for r in existing:
+            if r.get("period") == period:
+                updated.append(new_record)
+                replaced = True
+            else:
+                updated.append(r)
+        if not replaced:
+            updated.append(new_record)
+
+        path = self._path(client_name)
+        with path.open("w", encoding="utf-8") as fh:
+            for r in updated:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+        action = "Updated" if replaced else "Recorded"
+        log.debug("%s %d KPI deltas for %s / %s", action, len(kpi_deltas), client_name, period)
 
     def compute_profile(self, client_name: str) -> VolatilityProfile:
         """Return per-KPI thresholds based on stored history."""
