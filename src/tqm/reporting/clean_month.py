@@ -156,10 +156,21 @@ class CleanMonthChecker:
                 f"C3: {len(drift_failures)} report(s) ran with schema drift not clean"
             )
 
-        # Criterion 4: zero non-deterministic reruns (same data hash, different response)
+        # Criterion 4: deterministic pipeline — no late corrections, no hash divergence.
+        # A late_correction entry means the original source data was wrong and the pipeline
+        # was re-run after delivery. That is not a "clean" month regardless of whether the
+        # corrected output is now correct.
+        late_corrections = [e for e in month_entries if getattr(e, "late_correction", False)]
+        if late_corrections:
+            result.failed_criteria.append(
+                f"C4: {len(late_corrections)} late_correction rerun(s) — source data was wrong "
+                f"after original delivery: report_id(s) {', '.join(e.report_id for e in late_corrections[:3])}"
+            )
+        # Also check for non-determinism: same source hash, different Claude response.
         by_hash: dict[str, set[str]] = {}
         for e in month_entries:
-            by_hash.setdefault(e.source_data_hash, set()).add(e.response_hash)
+            if not getattr(e, "late_correction", False):  # exclude corrections from this check
+                by_hash.setdefault(e.source_data_hash, set()).add(e.response_hash)
         non_deterministic = {h: rs for h, rs in by_hash.items() if len(rs) > 1}
         if non_deterministic:
             result.failed_criteria.append(

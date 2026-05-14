@@ -25,13 +25,15 @@ def _make_audit_entry(
     source_data_hash: str = "abc123",
     response_hash: str | None = None,
     schema_drift_clean: bool = True,
+    late_correction: bool = False,
+    supersedes: str | None = None,
 ) -> str:
     """Append an AuditEntry-shaped dict to the audit log JSONL."""
     audit_dir.mkdir(parents=True, exist_ok=True)
     safe = client.lower().replace(" ", "_")
     year = generated_at[:4]
     path = audit_dir / f"{safe}_{year}.jsonl"
-    report_id = f"rid_{period}_{response_hash or 'x'}"
+    report_id = f"rid_{period}_{response_hash or 'x'}{'_corr' if late_correction else ''}"
     entry = {
         "report_id": report_id,
         "client_name": client,
@@ -49,6 +51,8 @@ def _make_audit_entry(
         "date_column_used": "date",
         "schema_drift_clean": schema_drift_clean,
         "volatility_thresholds": {},
+        "late_correction": late_correction,
+        "supersedes": supersedes,
     }
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry) + "\n")
@@ -168,6 +172,43 @@ def test_fallback_commentary_shipped_fails_clean(tmp_path):
 
 
 # ── Rolling window ────────────────────────────────────────────────────
+
+def test_late_correction_fails_c4(tmp_path):
+    """A late_correction rerun on a delivered period invalidates C4."""
+    audit = tmp_path / "audit"
+    corrections = tmp_path / "corrections"
+    _make_audit_entry(audit, "Acme", "2024-07", "2024-07-01T10:00:00Z",
+                      source_data_hash="original_data", response_hash="r1")
+    # Client sends corrected file; pipeline re-runs after original delivery
+    _make_audit_entry(audit, "Acme", "2024-07", "2024-07-15T10:00:00Z",
+                      source_data_hash="corrected_data", response_hash="r2",
+                      late_correction=True, supersedes="rid_2024-07_r1")
+
+    checker = CleanMonthChecker(audit_log_dir=audit, corrections_log_dir=corrections)
+    result = checker.check_month("Acme", "2024-07")
+    assert not result.is_clean
+    assert any("C4" in c and "late_correction" in c for c in result.failed_criteria)
+
+
+def test_late_correction_excluded_from_nondeterminism_check(tmp_path):
+    """A correction with different source data must NOT trigger C4 non-determinism."""
+    audit = tmp_path / "audit"
+    corrections = tmp_path / "corrections"
+    _make_audit_entry(audit, "Acme", "2024-07", "2024-07-01T10:00:00Z",
+                      source_data_hash="original", response_hash="r1")
+    # Correction has different source hash — would look non-deterministic if not excluded
+    _make_audit_entry(audit, "Acme", "2024-07", "2024-07-15T10:00:00Z",
+                      source_data_hash="corrected", response_hash="r2",
+                      late_correction=True)
+
+    checker = CleanMonthChecker(audit_log_dir=audit, corrections_log_dir=corrections)
+    result = checker.check_month("Acme", "2024-07")
+    # C4 fires because late_correction is present — but the reason is "late_correction",
+    # not "multiple response_hashes for same source hash"
+    c4_reasons = [c for c in result.failed_criteria if "C4" in c]
+    assert c4_reasons
+    assert not any("multiple response_hashes" in c for c in c4_reasons)
+
 
 def test_rolling_window_six_clean_months_eligible(tmp_path):
     audit = tmp_path / "audit"

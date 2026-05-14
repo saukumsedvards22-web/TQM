@@ -109,6 +109,22 @@ class SnapshotComparison:
         values (customer names, segment labels, etc.). Disable only for
         debugging or unit tests that need raw output.
         """
+        period_days_note: dict | None = None
+        if self.current.period_days > 0 and self.previous.period_days > 0:
+            diff = self.current.period_days - self.previous.period_days
+            period_days_note = {
+                "current_days": self.current.period_days,
+                "previous_days": self.previous.period_days,
+                "difference_days": diff,
+                "analyst_note": (
+                    f"Period length differs by {abs(diff)} day(s). "
+                    "Attribute up to "
+                    f"{abs(diff / max(self.previous.period_days, 1)) * 100:.1f}% "
+                    "of any revenue delta to period length, not business change."
+                    if abs(diff) >= 2 else "Period lengths match."
+                ),
+            }
+
         payload: dict = {
             "period": self.period_label,
             "kpi_deltas": self.kpi_deltas(),
@@ -116,6 +132,8 @@ class SnapshotComparison:
             "current_breakdowns": self.current.dimension_breakdowns,
             "previous_breakdowns": self.previous.dimension_breakdowns,
         }
+        if period_days_note:
+            payload["period_days"] = period_days_note
 
         if sanitize:
             from .sanitizer import PromptSanitizer

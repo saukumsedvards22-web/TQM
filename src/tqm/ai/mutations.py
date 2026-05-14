@@ -34,16 +34,18 @@ log = logging.getLogger(__name__)
 
 def baseline_comparison() -> SnapshotComparison:
     """A clean SnapshotComparison: revenue +5.6%, cost -8%, qty +5%."""
-    cur = MonthlySnapshot(period="2024-03", kpis={
-        "total_revenue": 95600.0,
-        "total_cost": 46000.0,
-        "total_qty": 1050.0,
-    })
-    prev = MonthlySnapshot(period="2024-02", kpis={
-        "total_revenue": 90531.0,
-        "total_cost": 50000.0,
-        "total_qty": 1000.0,
-    })
+    cur = MonthlySnapshot(
+        period="2024-03",
+        kpis={"total_revenue": 95600.0, "total_cost": 46000.0, "total_qty": 1050.0},
+        row_count=1000,
+        period_days=31,
+    )
+    prev = MonthlySnapshot(
+        period="2024-02",
+        kpis={"total_revenue": 90531.0, "total_cost": 50000.0, "total_qty": 1000.0},
+        row_count=1000,
+        period_days=29,
+    )
     return SnapshotComparison(current=cur, previous=prev)
 
 
@@ -88,6 +90,15 @@ def baseline_commentary() -> AICommentary:
 class Mutation:
     name: str
     apply: Callable[[AICommentary], AICommentary]
+    expected_block_code: str
+    description: str = ""
+
+
+@dataclass
+class ComparisonMutation:
+    """Like Mutation, but corrupts the SnapshotComparison instead of the commentary."""
+    name: str
+    apply: Callable[[SnapshotComparison], SnapshotComparison]
     expected_block_code: str
     description: str = ""
 
@@ -161,6 +172,36 @@ def _mutate_fallback_marker(c: AICommentary) -> AICommentary:
     out = _clone(c)
     out.headline = "[AI UNAVAILABLE — HUMAN REVIEW REQUIRED]"
     return out
+
+
+# ------------------------------------------------------------------
+# Comparison-level mutations (FM-12 / FM-13)
+# ------------------------------------------------------------------
+
+def _mutate_row_count_drop(comp: SnapshotComparison) -> SnapshotComparison:
+    """Simulate a truncated SAP export — current has 60% of expected rows."""
+    cur = copy.deepcopy(comp.current)
+    cur.row_count = 600  # 60% of 1000 → below 70% block threshold
+    return SnapshotComparison(current=cur, previous=copy.deepcopy(comp.previous))
+
+
+def _mutate_period_length_mismatch(comp: SnapshotComparison) -> SnapshotComparison:
+    """Simulate a mid-month extract — current covers only 15 days, previous 29."""
+    cur = copy.deepcopy(comp.current)
+    cur.period_days = 15  # 14-day gap → block threshold (≥7 days)
+    return SnapshotComparison(current=cur, previous=copy.deepcopy(comp.previous))
+
+
+COMPARISON_MUTATIONS: list[ComparisonMutation] = [
+    ComparisonMutation(
+        "row_count_drop", _mutate_row_count_drop, "ROW_COUNT_DROP",
+        "Current rows 60% of previous — truncated export",
+    ),
+    ComparisonMutation(
+        "period_length_mismatch", _mutate_period_length_mismatch, "PERIOD_LENGTH_MISMATCH",
+        "Current period 15 days vs 29 — partial-month extract",
+    ),
+]
 
 
 # ------------------------------------------------------------------
@@ -245,19 +286,31 @@ class MutationReport:
 def run_mutations(
     gate: ReviewGate | None = None,
     mutations: list[Mutation] | None = None,
+    comparison_mutations: list[ComparisonMutation] | None = None,
 ) -> MutationReport:
-    """Apply each mutation to the baseline commentary and verify the gate catches it.
+    """Apply each mutation and verify the gate catches it.
 
-    Returns a MutationReport listing which mutations were caught and which slipped past.
+    Commentary mutations corrupt AICommentary while keeping the comparison fixed.
+    Comparison mutations corrupt SnapshotComparison while keeping the commentary fixed.
     """
     gate = gate or ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
-    muts = mutations or MUTATIONS
-    comparison = baseline_comparison()
+    commentary_muts = mutations if mutations is not None else MUTATIONS
+    comparison_muts = comparison_mutations if comparison_mutations is not None else COMPARISON_MUTATIONS
 
     results: list[MutationResult] = []
-    for mutation in muts:
-        mutated = mutation.apply(baseline_commentary())
-        gate_result: ReviewResult = gate.check(mutated, comparison, "Mutation Test Client")
+    baseline_comp = baseline_comparison()
+    baseline_comm = baseline_commentary()
+
+    for mutation in commentary_muts:
+        mutated_comm = mutation.apply(copy.deepcopy(baseline_comm))
+        gate_result: ReviewResult = gate.check(mutated_comm, baseline_comp, "Mutation Test Client")
+        block_codes = [f.code for f in gate_result.blockers]
+        caught = mutation.expected_block_code in block_codes
+        results.append(MutationResult(mutation=mutation, caught=caught, actual_block_codes=block_codes))
+
+    for mutation in comparison_muts:
+        mutated_comp = mutation.apply(baseline_comp)
+        gate_result = gate.check(baseline_comm, mutated_comp, "Mutation Test Client")
         block_codes = [f.code for f in gate_result.blockers]
         caught = mutation.expected_block_code in block_codes
         results.append(MutationResult(mutation=mutation, caught=caught, actual_block_codes=block_codes))
