@@ -178,7 +178,8 @@ Recently closed:
 
 | ID | Old RPN | New RPN | Closed by |
 |----|---------|---------|-----------|
-| FM-09 | 252 | 56 | Structured `KeyFinding(kpi_id, direction, magnitude_pct, context)` — LLM fills tuple, code renders prose. Five gate checks: `MALFORMED_FINDING`, `UNKNOWN_KPI`, `FINDING_DIRECTION_MISMATCH`, `FINDING_MAGNITUDE_MISMATCH`, `CONTEXT_KPI_LEAK`. |
+| FM-07 | pending | 30 | `--confirm-dpa` flag required by `tqm report` for email delivery. Without it, CLI exits 1 before any API call is made. |
+| FM-09 | 252 | 56 | Structured `KeyFinding(kpi_id, direction, magnitude_pct, context)` — LLM fills tuple, code renders prose. Five gate checks. |
 | FM-12 | 96 | 48 | `ROW_COUNT_DROP` gate blocks at <70% of previous rows; `ROW_COUNT_LOW` warns at 70–85%; `ROW_COUNT_SPIKE` warns at >150%. |
 | FM-13 | 72 | 48 | `period_days` computed from actual date coverage in `MonthlySnapshot`; `PERIOD_LENGTH_MISMATCH` gate warns on ≥2-day diff, blocks on ≥7. |
 

@@ -229,6 +229,13 @@ def deploy(
 @click.option("--require-approval", is_flag=True, default=True, help="Block delivery on anomalies (default: on)")
 @click.option("--delta-block-pct", default=40.0, show_default=True, help="% change that blocks delivery for review")
 @click.option("--expected-period", default=None, help="Expected period for date validation e.g. 2024-03")
+@click.option(
+    "--confirm-dpa", is_flag=True, default=False,
+    help=(
+        "Confirm that a Data Processing Agreement covering Anthropic as a sub-processor "
+        "is in place with this client (required for email delivery — FM-07)."
+    ),
+)
 @click.pass_context
 def report(
     ctx: click.Context,
@@ -244,13 +251,31 @@ def report(
     require_approval: bool,
     delta_block_pct: float,
     expected_period: str | None,
+    confirm_dpa: bool,
 ) -> None:
     """Generate a monthly AI commentary report from two months of data.
 
     Runs schema drift detection, date column validation, AI review gate,
     and cost tracking before any delivery. Use --dry-run to generate
     without emailing.
+
+    Email delivery requires --confirm-dpa to be set, confirming a Data
+    Processing Agreement covering Anthropic as a sub-processor is in place.
+    See FM-07 in config/fmea.yaml and https://www.anthropic.com/legal/dpa
     """
+    # FM-07 gate: block email delivery when no DPA confirmation
+    if email_to and not dry_run and not confirm_dpa:
+        console.print(
+            "[red bold]DPA GATE BLOCKED[/red bold]\n"
+            "Email delivery requires --confirm-dpa.\n\n"
+            "Before sending client data to the Anthropic API:\n"
+            "  1. Confirm Anthropic is listed as a sub-processor in your DPA with this client.\n"
+            "  2. Anthropic's DPA: https://www.anthropic.com/legal/dpa\n"
+            "  3. Re-run with --confirm-dpa once the DPA is in place.\n\n"
+            "Use --dry-run to generate the report without emailing."
+        )
+        sys.exit(1)
+
     from .ingestion import ExcelIngester, SAPIngester
     from .schema import SchemaDetector, SchemaDriftDetector, DateColumnValidator
     from .ai import AIAnalyst, MonthlySnapshot, SnapshotComparison, ReviewGate, ReviewBlockedError, CostTracker
@@ -426,6 +451,11 @@ def run(ctx: click.Context, config_file: str) -> None:
         fmt=cfg.get("format", "all"),
         email_to=tuple(cfg.get("email_to", [])),
         api_key=cfg.get("anthropic_api_key"),
+        dry_run=cfg.get("dry_run", False),
+        require_approval=cfg.get("require_approval", True),
+        expected_period=cfg.get("expected_period"),
+        confirm_dpa=cfg.get("confirm_dpa", False),
+        delta_block_pct=cfg.get("delta_block_pct", 40.0),
     )
 
 
@@ -444,9 +474,15 @@ def mutate_gate(as_json: bool) -> None:
 
     Exit code 0 if all mutations caught; 1 if any gate hole detected.
     """
+    import logging as _logging
     from .ai.mutations import run_mutations
 
-    report = run_mutations()
+    # Suppress all log output during mutation runs — gate holes surface in the report.
+    _logging.disable(_logging.CRITICAL)
+    try:
+        report = run_mutations()
+    finally:
+        _logging.disable(_logging.NOTSET)
 
     if as_json:
         import json as _json

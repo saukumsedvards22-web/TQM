@@ -111,15 +111,14 @@ failure_modes:
     O: 3  # Only occurs if legal checklist is skipped
     D: 2  # Would be caught at legal review
     controls:
+      - --confirm-dpa flag required by CLI for email delivery (cli.py DPA gate)
+      - Without the flag, tqm report --email-to exits 1 before any API call is made
       - Pre-flight checklist item (see scripts/pre_flight_checklist.md)
       - Client DPA must include sub-processor disclosure for Anthropic
       - Consider anonymising customer names in prompt (replace with IDs)
     residual_D: 1
-    open: true
-    action: >
-      Add DPA confirmation gate to CLI: --confirm-dpa flag required for email delivery.
-      Default prompt context should hash/anonymise customer names.
-      Anthropic EU DPA available at: https://www.anthropic.com/legal/dpa
+    residual_RPN_note: "10 × 3 × 1 = 30 — closed; process control + CLI gate"
+    open: false
 
   - id: FM-08
     name: XMLA deployment fails silently on Linux CI
@@ -286,10 +285,10 @@ summary:
     - FM-01  # 144 — number magnitude in prose (closed by reconciler for findings; prose remains)
     - FM-02  # 252 — fabricated root cause; mitigated structurally, process control still required
     - FM-06  # 135 — wrong DAX filter context, mitigated by golden tests (now with two-analyst signoff)
-    - FM-07  # pending DPA gate (--confirm-dpa CLI flag)
     - FM-10  # 135 — prompt injection, mitigated by sanitizer + structural framing
 
   closed_since_last_review:
+    - FM-07  # was pending, now 30 — --confirm-dpa CLI gate blocks email delivery without DPA
     - FM-09  # was 252, now 56 — closed by KeyFinding structural generation + gate checks
     - FM-11  # opened and closed in same pass — mutation tests on the gate
     - FM-12  # was 96, now 48 — ROW_COUNT_DROP/LOW/SPIKE gate checks in review_gate.py

@@ -24,6 +24,7 @@ When a client disputes a number four months later:
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -68,6 +69,9 @@ class AuditEntry:
     late_correction: bool = False  # re-run on corrected source data after original delivery
     supersedes: str | None = None  # report_id of the entry this one replaces
 
+    # Cached at class-definition time — not recomputed per call.
+    _KNOWN_FIELDS: frozenset[str] = frozenset()  # populated below class body
+
     @classmethod
     def from_dict(cls, data: dict) -> "AuditEntry":
         """Deserialize from a JSONL dict, tolerating unknown fields from future versions.
@@ -77,9 +81,7 @@ class AuditEntry:
         This means old log entries (missing late_correction / supersedes) and
         future log entries (with fields not yet in this version) both load cleanly.
         """
-        import dataclasses
-        known = {f.name for f in dataclasses.fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        return cls(**{k: v for k, v in data.items() if k in cls._KNOWN_FIELDS})
 
     def to_dict(self) -> dict:
         return {
@@ -102,6 +104,9 @@ class AuditEntry:
             "late_correction": self.late_correction,
             "supersedes": self.supersedes,
         }
+
+
+AuditEntry._KNOWN_FIELDS = frozenset(f.name for f in dataclasses.fields(AuditEntry))
 
 
 class AuditLog:
