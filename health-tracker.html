@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BRUTAL HEALTH TRACKER</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg2: #111111;
+    --bg3: #1a1a1a;
+    --border: #222222;
+    --accent: #ff3333;
+    --accent2: #ff6600;
+    --green: #00cc66;
+    --blue: #0088ff;
+    --text: #e8e8e8;
+    --muted: #666666;
+    --warn: #ffaa00;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Courier New', monospace;
+    min-height: 100vh;
+  }
+
+  /* ---- HEADER ---- */
+  header {
+    border-bottom: 2px solid var(--accent);
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg2);
+  }
+
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 900;
+    letter-spacing: 4px;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  header .date {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  /* ---- NAV TABS ---- */
+  .tabs {
+    display: flex;
+    gap: 0;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+
+  .tab-btn {
+    padding: 14px 22px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ---- MAIN LAYOUT ---- */
+  .main { max-width: 900px; margin: 0 auto; padding: 28px 20px; }
+
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ---- CARDS ---- */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 22px;
+    margin-bottom: 18px;
+  }
+
+  .card h2 {
+    font-size: 0.75rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ---- FORMS ---- */
+  .form-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 130px;
+  }
+
+  label {
+    font-size: 0.7rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  input, select, textarea {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 10px 12px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent);
+  }
+
+  textarea { resize: vertical; min-height: 70px; }
+
+  select option { background: var(--bg3); }
+
+  /* ---- BUTTONS ---- */
+  .btn {
+    padding: 11px 22px;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: #cc0000; }
+
+  .btn-green {
+    background: var(--green);
+    color: #000;
+  }
+  .btn-green:hover { background: #00aa55; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 5px 10px;
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+  }
+  .btn-danger:hover { background: var(--accent); color: #fff; }
+
+  .btn-orange {
+    background: var(--accent2);
+    color: #000;
+  }
+  .btn-orange:hover { background: #cc5500; }
+
+  /* ---- LOG ENTRIES ---- */
+  .log-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .log-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--bg3);
+    border-radius: 3px;
+    border-left: 3px solid var(--border);
+  }
+
+  .log-item.food { border-left-color: var(--green); }
+  .log-item.gym { border-left-color: var(--blue); }
+  .log-item.sleep { border-left-color: var(--warn); }
+
+  .log-item-content { flex: 1; }
+
+  .log-item-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-bottom: 3px;
+  }
+
+  .log-item-meta {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
+  .log-item-tag {
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .tag-food { background: rgba(0, 204, 102, 0.15); color: var(--green); }
+  .tag-gym  { background: rgba(0, 136, 255, 0.15); color: var(--blue); }
+  .tag-sleep{ background: rgba(255, 170, 0, 0.15); color: var(--warn); }
+
+  /* ---- EMPTY STATE ---- */
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 36px 20px;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+  }
+
+  /* ---- TODAY DASHBOARD ---- */
+  .stats-row {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .stat-box {
+    flex: 1;
+    min-width: 120px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+    text-align: center;
+  }
+
+  .stat-num {
+    font-size: 1.8rem;
+    font-weight: 900;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 0.65rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .stat-box.food-stat .stat-num { color: var(--green); }
+  .stat-box.gym-stat  .stat-num { color: var(--blue); }
+  .stat-box.sleep-stat .stat-num { color: var(--warn); }
+  .stat-box.cal-stat  .stat-num { color: var(--accent2); }
+
+  /* ---- FEEDBACK ---- */
+  .api-setup {
+    background: var(--bg3);
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .api-setup p {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 12px;
+    line-height: 1.6;
+  }
+
+  .feedback-output {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 22px;
+    font-size: 0.9rem;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    min-height: 120px;
+    position: relative;
+  }
+
+  .feedback-output.loading {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .feedback-output .grade {
+    font-size: 3rem;
+    font-weight: 900;
+    display: block;
+    margin-bottom: 16px;
+  }
+
+  .grade-A { color: var(--green); }
+  .grade-B { color: #88cc00; }
+  .grade-C { color: var(--warn); }
+  .grade-D { color: var(--accent2); }
+  .grade-F { color: var(--accent); }
+
+  /* ---- HISTORY ---- */
+  .history-day {
+    margin-bottom: 24px;
+  }
+
+  .history-day-header {
+    font-size: 0.75rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ---- SETTINGS ---- */
+  .settings-group {
+    margin-bottom: 24px;
+  }
+
+  .settings-group h3 {
+    font-size: 0.7rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .danger-zone {
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 18px;
+  }
+
+  .danger-zone p {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* ---- TOAST ---- */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--bg2);
+    border: 1px solid var(--green);
+    color: var(--green);
+    padding: 12px 20px;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    letter-spacing: 1px;
+    font-weight: 700;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.2s;
+    z-index: 999;
+    pointer-events: none;
+  }
+
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.error { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- SCROLLBAR ---- */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* ---- EXERCISE ROW ---- */
+  .exercise-set-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .exercise-set-row .form-group { min-width: 90px; }
+
+  .add-set-btn {
+    background: none;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 0.75rem;
+    padding: 8px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-bottom: 14px;
+    transition: all 0.15s;
+  }
+  .add-set-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+  .separator { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+
+  .rating-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .rating-btn {
+    padding: 7px 14px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 0.8rem;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .rating-btn.selected, .rating-btn:hover { background: var(--accent2); color: #000; border-color: var(--accent2); }
+  .rating-btn[data-val="5"].selected { background: var(--green); border-color: var(--green); color: #000; }
+  .rating-btn[data-val="1"].selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .rating-btn[data-val="2"].selected { background: #cc3300; border-color: #cc3300; color: #fff; }
+
+  @media (max-width: 600px) {
+    header h1 { font-size: 1rem; letter-spacing: 2px; }
+    .tab-btn { padding: 12px 14px; font-size: 0.7rem; }
+    .main { padding: 18px 14px; }
+    .stat-num { font-size: 1.4rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#9760; Brutal Tracker</h1>
+  <span class="date" id="headerDate"></span>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" onclick="switchTab('today')">Today</button>
+  <button class="tab-btn" onclick="switchTab('food')">Food</button>
+  <button class="tab-btn" onclick="switchTab('gym')">Gym</button>
+  <button class="tab-btn" onclick="switchTab('sleep')">Sleep</button>
+  <button class="tab-btn" onclick="switchTab('feedback')">AI Roast</button>
+  <button class="tab-btn" onclick="switchTab('history')">History</button>
+  <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
+</nav>
+
+<div class="main">
+
+  <!-- ═══ TODAY ═══ -->
+  <div class="section active" id="tab-today">
+    <div class="stats-row" id="statsRow"></div>
+    <div class="card">
+      <h2>Today's Log</h2>
+      <div class="log-list" id="todayList"></div>
+    </div>
+  </div>
+
+  <!-- ═══ FOOD ═══ -->
+  <div class="section" id="tab-food">
+    <div class="card">
+      <h2>Log Food / Meal</h2>
+      <div class="form-row">
+        <div class="form-group" style="flex:2;min-width:200px">
+          <label>What did you eat?</label>
+          <input type="text" id="foodName" placeholder="e.g. Chicken breast + rice" />
+        </div>
+        <div class="form-group">
+          <label>Time</label>
+          <input type="time" id="foodTime" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Calories (optional)</label>
+          <input type="number" id="foodCals" placeholder="kcal" min="0" />
+        </div>
+        <div class="form-group">
+          <label>Meal Type</label>
+          <select id="foodType">
+            <option value="meal">Meal</option>
+            <option value="snack">Snack</option>
+            <option value="drink">Drink</option>
+            <option value="cheat">Cheat Meal</option>
+            <option value="supplement">Supplement</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Protein (g, optional)</label>
+          <input type="number" id="foodProtein" placeholder="g" min="0" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>Notes (optional)</label>
+          <input type="text" id="foodNotes" placeholder="e.g. post-workout, felt sick after..." />
+        </div>
+      </div>
+      <button class="btn btn-green" onclick="logFood()">Log It</button>
+    </div>
+
+    <div class="card">
+      <h2>Today's Food</h2>
+      <div class="log-list" id="foodList"></div>
+    </div>
+  </div>
+
+  <!-- ═══ GYM ═══ -->
+  <div class="section" id="tab-gym">
+    <div class="card">
+      <h2>Log Workout</h2>
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>Exercise Name</label>
+          <input type="text" id="gymExercise" placeholder="e.g. Bench Press" />
+        </div>
+        <div class="form-group">
+          <label>Time</label>
+          <input type="time" id="gymTime" />
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <select id="gymCategory">
+            <option value="strength">Strength</option>
+            <option value="cardio">Cardio</option>
+            <option value="hiit">HIIT</option>
+            <option value="flexibility">Flexibility</option>
+            <option value="sport">Sport</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="gymSetsContainer">
+        <div class="exercise-set-row" id="gymSets">
+          <div class="form-group">
+            <label>Sets</label>
+            <input type="number" class="gym-sets" placeholder="3" min="1" />
+          </div>
+          <div class="form-group">
+            <label>Reps</label>
+            <input type="number" class="gym-reps" placeholder="10" min="1" />
+          </div>
+          <div class="form-group">
+            <label>Weight (kg)</label>
+            <input type="number" class="gym-weight" placeholder="60" min="0" step="0.5" />
+          </div>
+          <div class="form-group">
+            <label>Duration (min)</label>
+            <input type="number" class="gym-duration" placeholder="—" min="0" />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top:4px">
+        <div class="form-group" style="flex:2">
+          <label>Notes</label>
+          <input type="text" id="gymNotes" placeholder="e.g. PR, felt weak, failed last set..." />
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <label style="display:block;margin-bottom:8px">How was the workout?</label>
+        <div class="rating-row" id="gymRating">
+          <button class="rating-btn" data-val="1" onclick="setRating('gym',1)">1 — Trash</button>
+          <button class="rating-btn" data-val="2" onclick="setRating('gym',2)">2 — Bad</button>
+          <button class="rating-btn" data-val="3" onclick="setRating('gym',3)">3 — OK</button>
+          <button class="rating-btn" data-val="4" onclick="setRating('gym',4)">4 — Good</button>
+          <button class="rating-btn" data-val="5" onclick="setRating('gym',5)">5 — Beast</button>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="logGym()">Log Exercise</button>
+    </div>
+
+    <div class="card">
+      <h2>Today's Gym</h2>
+      <div class="log-list" id="gymList"></div>
+    </div>
+  </div>
+
+  <!-- ═══ SLEEP ═══ -->
+  <div class="section" id="tab-sleep">
+    <div class="card">
+      <h2>Log Sleep</h2>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Went to bed</label>
+          <input type="datetime-local" id="sleepBedtime" />
+        </div>
+        <div class="form-group">
+          <label>Woke up</label>
+          <input type="datetime-local" id="sleepWakeup" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Sleep Quality</label>
+          <div class="rating-row" id="sleepRating">
+            <button class="rating-btn" data-val="1" onclick="setRating('sleep',1)">1 — Awful</button>
+            <button class="rating-btn" data-val="2" onclick="setRating('sleep',2)">2 — Poor</button>
+            <button class="rating-btn" data-val="3" onclick="setRating('sleep',3)">3 — OK</button>
+            <button class="rating-btn" data-val="4" onclick="setRating('sleep',4)">4 — Good</button>
+            <button class="rating-btn" data-val="5" onclick="setRating('sleep',5)">5 — Perfect</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-row" style="margin-top:8px">
+        <div class="form-group" style="flex:2">
+          <label>Notes</label>
+          <input type="text" id="sleepNotes" placeholder="e.g. woke up 3x, vivid dreams, stress..." />
+        </div>
+      </div>
+      <button class="btn btn-orange" onclick="logSleep()">Log Sleep</button>
+    </div>
+
+    <div class="card">
+      <h2>Recent Sleep</h2>
+      <div class="log-list" id="sleepList"></div>
+    </div>
+  </div>
+
+  <!-- ═══ AI ROAST ═══ -->
+  <div class="section" id="tab-feedback">
+    <div class="card">
+      <h2>AI Brutal Feedback</h2>
+
+      <div class="api-setup" id="apiSetupBox">
+        <p>Enter your Anthropic API key. It stays in your browser — never sent anywhere except directly to Anthropic's API.</p>
+        <div class="form-row">
+          <div class="form-group" style="flex:2">
+            <label>Anthropic API Key</label>
+            <input type="password" id="apiKeyInput" placeholder="sk-ant-..." />
+          </div>
+          <div class="form-group" style="justify-content:flex-end">
+            <button class="btn btn-ghost" onclick="saveApiKey()">Save Key</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-bottom:14px">
+        <div class="form-group">
+          <label>Feedback for</label>
+          <select id="feedbackDate">
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="week">Last 7 days</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Brutality Level</label>
+          <select id="brutalityLevel">
+            <option value="honest">Honest coach</option>
+            <option value="brutal" selected>Brutal — no mercy</option>
+            <option value="savage">Savage — destroy me</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="getFeedback()" id="feedbackBtn">Get Roasted</button>
+
+      <div style="margin-top:20px">
+        <div class="feedback-output" id="feedbackOutput">
+          <span style="color:var(--muted);font-size:0.85rem">Your AI coach will destroy you here. You've been warned.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ HISTORY ═══ -->
+  <div class="section" id="tab-history">
+    <div class="card">
+      <h2>History</h2>
+      <div id="historyContent"></div>
+    </div>
+  </div>
+
+  <!-- ═══ SETTINGS ═══ -->
+  <div class="section" id="tab-settings">
+    <div class="card">
+      <h2>Settings</h2>
+      <div class="settings-group">
+        <h3>Profile</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Your Name</label>
+            <input type="text" id="settingsName" placeholder="Your name" />
+          </div>
+          <div class="form-group">
+            <label>Daily Calorie Goal</label>
+            <input type="number" id="settingsCals" placeholder="2000" min="0" />
+          </div>
+          <div class="form-group">
+            <label>Daily Protein Goal (g)</label>
+            <input type="number" id="settingsProtein" placeholder="150" min="0" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Target Bedtime</label>
+            <input type="time" id="settingsBedtime" placeholder="23:00" />
+          </div>
+          <div class="form-group">
+            <label>Target Wake Time</label>
+            <input type="time" id="settingsWakeTime" placeholder="07:00" />
+          </div>
+        </div>
+        <button class="btn btn-green" onclick="saveSettings()">Save Settings</button>
+      </div>
+
+      <hr class="separator" />
+
+      <div class="settings-group danger-zone">
+        <h3>Danger Zone</h3>
+        <p>This will permanently delete all your logged data. Cannot be undone.</p>
+        <button class="btn btn-danger" onclick="clearAllData()">Wipe All Data</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════
+// STATE & STORAGE
+// ═══════════════════════════════════════════
+const STORAGE_KEY = 'brutalTracker_v1';
+
+function loadData() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { entries: [], settings: {} }; }
+  catch { return { entries: [], settings: {} }; }
+}
+
+function saveData(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function getData() { return loadData(); }
+
+// ═══════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatDate(str) {
+  const d = new Date(str + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function formatTime(str) {
+  if (!str) return '';
+  const [h, m] = str.split(':');
+  const ampm = +h >= 12 ? 'PM' : 'AM';
+  const hour = (+h % 12) || 12;
+  return `${hour}:${m} ${ampm}`;
+}
+
+function formatDateTime(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function durationHours(bedtime, wakeup) {
+  if (!bedtime || !wakeup) return null;
+  const diff = (new Date(wakeup) - new Date(bedtime)) / 3600000;
+  if (diff < 0) return null;
+  return diff;
+}
+
+function setCurrentTime(inputId) {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById(inputId).value = `${hh}:${mm}`;
+}
+
+function setCurrentDateTime(inputId) {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  document.getElementById(inputId).value = now.toISOString().slice(0, 16);
+}
+
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => { t.className = 'toast'; }, 2800);
+}
+
+// ratings state
+const ratings = { gym: 0, sleep: 0 };
+
+function setRating(type, val) {
+  ratings[type] = val;
+  document.querySelectorAll(`#${type}Rating .rating-btn`).forEach(btn => {
+    btn.classList.toggle('selected', +btn.dataset.val === val);
+  });
+}
+
+// ═══════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', b.getAttribute('onclick') === `switchTab('${name}')`);
+  });
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  renderTab(name);
+}
+
+function renderTab(name) {
+  if (name === 'today') renderToday();
+  if (name === 'food') renderFoodList();
+  if (name === 'gym') renderGymList();
+  if (name === 'sleep') renderSleepList();
+  if (name === 'history') renderHistory();
+  if (name === 'settings') loadSettings();
+}
+
+// ═══════════════════════════════════════════
+// LOG FOOD
+// ═══════════════════════════════════════════
+function logFood() {
+  const name = document.getElementById('foodName').value.trim();
+  if (!name) { showToast('Add what you ate!', true); return; }
+
+  const entry = {
+    id: Date.now(),
+    type: 'food',
+    date: todayStr(),
+    name,
+    time: document.getElementById('foodTime').value,
+    calories: +document.getElementById('foodCals').value || null,
+    protein: +document.getElementById('foodProtein').value || null,
+    mealType: document.getElementById('foodType').value,
+    notes: document.getElementById('foodNotes').value.trim(),
+  };
+
+  const data = getData();
+  data.entries.push(entry);
+  saveData(data);
+
+  // reset
+  ['foodName','foodCals','foodProtein','foodNotes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('foodType').value = 'meal';
+
+  showToast('Food logged.');
+  renderFoodList();
+  renderToday();
+}
+
+// ═══════════════════════════════════════════
+// LOG GYM
+// ═══════════════════════════════════════════
+function logGym() {
+  const exercise = document.getElementById('gymExercise').value.trim();
+  if (!exercise) { showToast('Add exercise name!', true); return; }
+
+  const sets = +document.querySelector('.gym-sets').value || null;
+  const reps = +document.querySelector('.gym-reps').value || null;
+  const weight = parseFloat(document.querySelector('.gym-weight').value) || null;
+  const duration = +document.querySelector('.gym-duration').value || null;
+
+  const entry = {
+    id: Date.now(),
+    type: 'gym',
+    date: todayStr(),
+    exercise,
+    time: document.getElementById('gymTime').value,
+    category: document.getElementById('gymCategory').value,
+    sets, reps, weight, duration,
+    rating: ratings.gym || null,
+    notes: document.getElementById('gymNotes').value.trim(),
+  };
+
+  const data = getData();
+  data.entries.push(entry);
+  saveData(data);
+
+  // reset
+  document.getElementById('gymExercise').value = '';
+  document.getElementById('gymNotes').value = '';
+  document.querySelector('.gym-sets').value = '';
+  document.querySelector('.gym-reps').value = '';
+  document.querySelector('.gym-weight').value = '';
+  document.querySelector('.gym-duration').value = '';
+  ratings.gym = 0;
+  document.querySelectorAll('#gymRating .rating-btn').forEach(b => b.classList.remove('selected'));
+
+  showToast('Exercise logged.');
+  renderGymList();
+  renderToday();
+}
+
+// ═══════════════════════════════════════════
+// LOG SLEEP
+// ═══════════════════════════════════════════
+function logSleep() {
+  const bedtime = document.getElementById('sleepBedtime').value;
+  const wakeup = document.getElementById('sleepWakeup').value;
+
+  if (!bedtime && !wakeup) { showToast('Enter at least one time!', true); return; }
+
+  const hours = durationHours(bedtime, wakeup);
+
+  const entry = {
+    id: Date.now(),
+    type: 'sleep',
+    date: todayStr(),
+    bedtime, wakeup,
+    hours: hours ? Math.round(hours * 10) / 10 : null,
+    quality: ratings.sleep || null,
+    notes: document.getElementById('sleepNotes').value.trim(),
+  };
+
+  const data = getData();
+  data.entries.push(entry);
+  saveData(data);
+
+  // reset
+  document.getElementById('sleepBedtime').value = '';
+  document.getElementById('sleepWakeup').value = '';
+  document.getElementById('sleepNotes').value = '';
+  ratings.sleep = 0;
+  document.querySelectorAll('#sleepRating .rating-btn').forEach(b => b.classList.remove('selected'));
+
+  showToast('Sleep logged.');
+  renderSleepList();
+  renderToday();
+}
+
+// ═══════════════════════════════════════════
+// DELETE ENTRY
+// ═══════════════════════════════════════════
+function deleteEntry(id) {
+  const data = getData();
+  data.entries = data.entries.filter(e => e.id !== id);
+  saveData(data);
+  renderToday();
+  renderFoodList();
+  renderGymList();
+  renderSleepList();
+  renderHistory();
+  showToast('Deleted.');
+}
+
+// ═══════════════════════════════════════════
+// RENDER HELPERS
+// ═══════════════════════════════════════════
+function entryHTML(e) {
+  let title = '', meta = [], tag = '';
+
+  if (e.type === 'food') {
+    title = e.name;
+    if (e.mealType) tag = `<span class="log-item-tag tag-food">${e.mealType}</span>`;
+    if (e.time) meta.push(formatTime(e.time));
+    if (e.calories) meta.push(`${e.calories} kcal`);
+    if (e.protein) meta.push(`${e.protein}g protein`);
+    if (e.notes) meta.push(e.notes);
+  } else if (e.type === 'gym') {
+    title = e.exercise;
+    tag = `<span class="log-item-tag tag-gym">${e.category}</span>`;
+    if (e.time) meta.push(formatTime(e.time));
+    const parts = [];
+    if (e.sets) parts.push(`${e.sets} sets`);
+    if (e.reps) parts.push(`${e.reps} reps`);
+    if (e.weight) parts.push(`${e.weight}kg`);
+    if (e.duration) parts.push(`${e.duration}min`);
+    if (parts.length) meta.push(parts.join(' × '));
+    if (e.rating) meta.push('★'.repeat(e.rating));
+    if (e.notes) meta.push(e.notes);
+  } else if (e.type === 'sleep') {
+    const hrs = e.hours ? `${e.hours}h` : '';
+    title = hrs ? `${hrs} sleep` : 'Sleep logged';
+    tag = `<span class="log-item-tag tag-sleep">sleep</span>`;
+    if (e.bedtime) meta.push(`bed: ${formatDateTime(e.bedtime)}`);
+    if (e.wakeup) meta.push(`up: ${formatDateTime(e.wakeup)}`);
+    if (e.quality) meta.push(`quality: ${'★'.repeat(e.quality)}`);
+    if (e.notes) meta.push(e.notes);
+  }
+
+  return `
+    <div class="log-item ${e.type}">
+      <div class="log-item-content">
+        <div class="log-item-title">${title}</div>
+        ${meta.length ? `<div class="log-item-meta">${meta.join(' &nbsp;·&nbsp; ')}</div>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        ${tag}
+        <button class="btn btn-danger" onclick="deleteEntry(${e.id})">✕</button>
+      </div>
+    </div>`;
+}
+
+function renderList(containerId, entries) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty">Nothing here yet.</div>';
+    return;
+  }
+  el.innerHTML = entries.map(entryHTML).join('');
+}
+
+function renderFoodList() {
+  const data = getData();
+  const entries = data.entries.filter(e => e.type === 'food' && e.date === todayStr());
+  renderList('foodList', entries);
+}
+
+function renderGymList() {
+  const data = getData();
+  const entries = data.entries.filter(e => e.type === 'gym' && e.date === todayStr());
+  renderList('gymList', entries);
+}
+
+function renderSleepList() {
+  const data = getData();
+  const entries = data.entries.filter(e => e.type === 'sleep').slice(-5).reverse();
+  renderList('sleepList', entries);
+}
+
+// ═══════════════════════════════════════════
+// TODAY DASHBOARD
+// ═══════════════════════════════════════════
+function renderToday() {
+  const data = getData();
+  const today = data.entries.filter(e => e.date === todayStr());
+
+  const foods = today.filter(e => e.type === 'food');
+  const gyms = today.filter(e => e.type === 'gym');
+  const sleeps = data.entries.filter(e => e.type === 'sleep').slice(-1);
+
+  const totalCals = foods.reduce((s, e) => s + (e.calories || 0), 0);
+  const totalProtein = foods.reduce((s, e) => s + (e.protein || 0), 0);
+  const lastSleep = sleeps[0];
+
+  const statsEl = document.getElementById('statsRow');
+  statsEl.innerHTML = `
+    <div class="stat-box food-stat">
+      <div class="stat-num">${foods.length}</div>
+      <div class="stat-label">Meals Logged</div>
+    </div>
+    <div class="stat-box cal-stat">
+      <div class="stat-num">${totalCals || '—'}</div>
+      <div class="stat-label">Calories</div>
+    </div>
+    <div class="stat-box gym-stat">
+      <div class="stat-num">${gyms.length}</div>
+      <div class="stat-label">Exercises</div>
+    </div>
+    <div class="stat-box sleep-stat">
+      <div class="stat-num">${lastSleep && lastSleep.hours ? lastSleep.hours + 'h' : '—'}</div>
+      <div class="stat-label">Last Sleep</div>
+    </div>
+    ${totalProtein ? `<div class="stat-box" style="--accent3:#aa66ff"><div class="stat-num" style="color:#aa66ff">${totalProtein}g</div><div class="stat-label">Protein</div></div>` : ''}
+  `;
+
+  renderList('todayList', today);
+}
+
+// ═══════════════════════════════════════════
+// HISTORY
+// ═══════════════════════════════════════════
+function renderHistory() {
+  const data = getData();
+  const byDate = {};
+  data.entries.forEach(e => {
+    if (!byDate[e.date]) byDate[e.date] = [];
+    byDate[e.date].push(e);
+  });
+
+  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+  const el = document.getElementById('historyContent');
+
+  if (!dates.length) {
+    el.innerHTML = '<div class="empty">No history yet. Start logging!</div>';
+    return;
+  }
+
+  el.innerHTML = dates.map(date => `
+    <div class="history-day">
+      <div class="history-day-header">${formatDate(date)}</div>
+      <div class="log-list">${byDate[date].map(entryHTML).join('')}</div>
+    </div>
+  `).join('');
+}
+
+// ═══════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════
+function loadSettings() {
+  const { settings } = getData();
+  if (settings.name) document.getElementById('settingsName').value = settings.name;
+  if (settings.calories) document.getElementById('settingsCals').value = settings.calories;
+  if (settings.protein) document.getElementById('settingsProtein').value = settings.protein;
+  if (settings.bedtime) document.getElementById('settingsBedtime').value = settings.bedtime;
+  if (settings.wakeTime) document.getElementById('settingsWakeTime').value = settings.wakeTime;
+
+  const key = localStorage.getItem('brutalTracker_apiKey');
+  if (key) document.getElementById('apiKeyInput').value = key;
+}
+
+function saveSettings() {
+  const data = getData();
+  data.settings = {
+    name: document.getElementById('settingsName').value.trim(),
+    calories: +document.getElementById('settingsCals').value || null,
+    protein: +document.getElementById('settingsProtein').value || null,
+    bedtime: document.getElementById('settingsBedtime').value,
+    wakeTime: document.getElementById('settingsWakeTime').value,
+  };
+  saveData(data);
+  showToast('Settings saved.');
+}
+
+function clearAllData() {
+  if (!confirm('Delete ALL data? This cannot be undone.')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  showToast('All data wiped.');
+  renderToday();
+}
+
+function saveApiKey() {
+  const key = document.getElementById('apiKeyInput').value.trim();
+  if (!key) { showToast('Enter a key!', true); return; }
+  localStorage.setItem('brutalTracker_apiKey', key);
+  showToast('API key saved.');
+}
+
+// ═══════════════════════════════════════════
+// AI BRUTAL FEEDBACK
+// ═══════════════════════════════════════════
+function buildContext(period) {
+  const data = getData();
+  const { settings } = data;
+
+  let entries = [];
+  const now = new Date();
+
+  if (period === 'today') {
+    entries = data.entries.filter(e => e.date === todayStr());
+  } else if (period === 'yesterday') {
+    const yest = new Date(now);
+    yest.setDate(yest.getDate() - 1);
+    entries = data.entries.filter(e => e.date === yest.toISOString().slice(0, 10));
+  } else if (period === 'week') {
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    entries = data.entries.filter(e => new Date(e.date + 'T12:00:00') >= weekAgo);
+  }
+
+  let ctx = '';
+
+  if (settings.name) ctx += `User: ${settings.name}\n`;
+  if (settings.calories) ctx += `Daily calorie goal: ${settings.calories} kcal\n`;
+  if (settings.protein) ctx += `Daily protein goal: ${settings.protein}g\n`;
+  if (settings.bedtime) ctx += `Target bedtime: ${settings.bedtime}\n`;
+  if (settings.wakeTime) ctx += `Target wake time: ${settings.wakeTime}\n`;
+  ctx += '\n';
+
+  const foods = entries.filter(e => e.type === 'food');
+  const gyms = entries.filter(e => e.type === 'gym');
+  const sleeps = entries.filter(e => e.type === 'sleep');
+
+  if (!entries.length) return null;
+
+  if (foods.length) {
+    ctx += '=== FOOD LOG ===\n';
+    foods.forEach(f => {
+      ctx += `- ${f.name} (${f.mealType})`;
+      if (f.time) ctx += ` at ${f.time}`;
+      if (f.calories) ctx += ` — ${f.calories} kcal`;
+      if (f.protein) ctx += `, ${f.protein}g protein`;
+      if (f.notes) ctx += ` [${f.notes}]`;
+      ctx += '\n';
+    });
+    const totalCals = foods.reduce((s, e) => s + (e.calories || 0), 0);
+    const totalProt = foods.reduce((s, e) => s + (e.protein || 0), 0);
+    if (totalCals) ctx += `Total calories: ${totalCals} kcal\n`;
+    if (totalProt) ctx += `Total protein: ${totalProt}g\n`;
+    ctx += '\n';
+  } else {
+    ctx += '=== FOOD LOG: Nothing logged. ===\n\n';
+  }
+
+  if (gyms.length) {
+    ctx += '=== GYM / WORKOUT ===\n';
+    gyms.forEach(g => {
+      ctx += `- ${g.exercise} (${g.category})`;
+      if (g.sets) ctx += ` — ${g.sets} sets`;
+      if (g.reps) ctx += ` × ${g.reps} reps`;
+      if (g.weight) ctx += ` @ ${g.weight}kg`;
+      if (g.duration) ctx += ` for ${g.duration}min`;
+      if (g.rating) ctx += ` — rated ${g.rating}/5`;
+      if (g.notes) ctx += ` [${g.notes}]`;
+      ctx += '\n';
+    });
+    ctx += '\n';
+  } else {
+    ctx += '=== GYM: No workout logged. ===\n\n';
+  }
+
+  if (sleeps.length) {
+    ctx += '=== SLEEP ===\n';
+    sleeps.forEach(s => {
+      if (s.bedtime) ctx += `Went to bed: ${s.bedtime}\n`;
+      if (s.wakeup) ctx += `Woke up: ${s.wakeup}\n`;
+      if (s.hours) ctx += `Total sleep: ${s.hours}h\n`;
+      if (s.quality) ctx += `Quality: ${s.quality}/5\n`;
+      if (s.notes) ctx += `Notes: ${s.notes}\n`;
+    });
+    ctx += '\n';
+  } else {
+    ctx += '=== SLEEP: Not logged. ===\n\n';
+  }
+
+  return ctx;
+}
+
+function getBrutalityPrompt(level) {
+  if (level === 'honest') {
+    return `You are a no-BS fitness coach. Be direct, honest, and constructive. Point out exactly what's wrong and what's good. Give a letter grade (A-F) at the start. Be specific about numbers.`;
+  }
+  if (level === 'savage') {
+    return `You are a savage drill sergeant who has zero patience for excuses. Be absolutely merciless, use military-style language, mock any laziness or bad choices, but back everything up with specific data from their log. Make them feel ashamed if they deserve it. Give a letter grade (A-F) at the very start. No sugarcoating. No diplomatic phrasing. Tear into them if they deserve it.`;
+  }
+  // brutal (default)
+  return `You are a brutally honest fitness coach. You don't sugarcoat anything. If they did badly, tell them exactly how and why. Give a letter grade (A-F) at the very start (just the letter on its own line). Reference specific numbers from their log. Call out any excuses. Be aggressive but factual. If something is actually good, acknowledge it — but don't let compliments overshadow real problems.`;
+}
+
+async function getFeedback() {
+  const apiKey = localStorage.getItem('brutalTracker_apiKey');
+  if (!apiKey) {
+    showToast('Save your API key first!', true);
+    document.getElementById('apiSetupBox').scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
+
+  const period = document.getElementById('feedbackDate').value;
+  const brutality = document.getElementById('brutalityLevel').value;
+  const ctx = buildContext(period);
+
+  if (!ctx) {
+    showToast('No data logged for that period!', true);
+    return;
+  }
+
+  const outputEl = document.getElementById('feedbackOutput');
+  const btn = document.getElementById('feedbackBtn');
+
+  outputEl.className = 'feedback-output loading';
+  outputEl.textContent = 'Preparing to destroy you...';
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+
+  const systemPrompt = getBrutalityPrompt(brutality);
+  const userMessage = `Here is my health log:\n\n${ctx}\n\nGive me your brutal assessment. Start with a letter grade on its own line.`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-7',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+    const text = result.content?.[0]?.text || 'No response';
+
+    // extract grade from first line
+    const lines = text.trim().split('\n');
+    const firstLine = lines[0].trim();
+    const gradeMatch = firstLine.match(/^([A-F][+-]?)$/i);
+
+    outputEl.className = 'feedback-output';
+
+    if (gradeMatch) {
+      const grade = gradeMatch[1].toUpperCase();
+      const gradeClass = `grade-${grade[0]}`;
+      const rest = lines.slice(1).join('\n').trim();
+      outputEl.innerHTML = `<span class="grade ${gradeClass}">${grade}</span>${escapeHtml(rest)}`;
+    } else {
+      outputEl.textContent = text;
+    }
+
+  } catch (err) {
+    outputEl.className = 'feedback-output';
+    outputEl.textContent = `Error: ${err.message}\n\nCheck your API key and try again.`;
+    showToast('API error — check key', true);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Get Roasted';
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ═══════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════
+function init() {
+  // set header date
+  document.getElementById('headerDate').textContent = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+  });
+
+  // pre-fill current time in forms
+  setCurrentTime('foodTime');
+  setCurrentTime('gymTime');
+  setCurrentDateTime('sleepWakeup');
+
+  // pre-fill api key if exists
+  const key = localStorage.getItem('brutalTracker_apiKey');
+  if (key) {
+    document.getElementById('apiKeyInput').value = key;
+    document.getElementById('apiSetupBox').style.opacity = '0.5';
+  }
+
+  renderToday();
+}
+
+init();
+</script>
+</body>
+</html>
