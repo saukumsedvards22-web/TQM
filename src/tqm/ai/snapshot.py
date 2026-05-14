@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import date
 
 import pandas as pd
 
@@ -17,6 +16,7 @@ class MonthlySnapshot:
     kpis: dict[str, float]
     dimension_breakdowns: dict[str, dict[str, float]] = field(default_factory=dict)
     row_count: int = 0
+    period_days: int = 0  # actual coverage = (max_date - min_date).days + 1
 
     @classmethod
     def from_dataframe(
@@ -41,11 +41,21 @@ class MonthlySnapshot:
                 grouped = df.groupby(dim)[primary].sum().nlargest(10)
                 breakdowns[dim] = {str(k): float(v) for k, v in grouped.items()}
 
+        period_days = 0
+        if date_col in df.columns and len(df):
+            try:
+                dates = pd.to_datetime(df[date_col], errors="coerce").dropna()
+                if len(dates):
+                    period_days = int((dates.max() - dates.min()).days) + 1
+            except (TypeError, ValueError):
+                period_days = 0
+
         return cls(
             period=period,
             kpis=kpis,
             dimension_breakdowns=breakdowns,
             row_count=len(df),
+            period_days=period_days,
         )
 
     def to_json(self) -> str:
@@ -53,6 +63,7 @@ class MonthlySnapshot:
             {
                 "period": self.period,
                 "row_count": self.row_count,
+                "period_days": self.period_days,
                 "kpis": self.kpis,
                 "dimension_breakdowns": self.dimension_breakdowns,
             },

@@ -217,16 +217,14 @@ failure_modes:
     O: 3  # Truncated files are common; most ingestors fail loudly on malformed rows
     D: 7  # Partial file looks valid until you compare row count to previous month
     controls:
-      - Row-count check: warn if current month has <70% of previous month's row count
+      - ROW_COUNT_DROP gate check: blocks when current_rows < 70% of previous_rows
+      - ROW_COUNT_LOW gate warn: warns at 70–85% of previous_rows
+      - ROW_COUNT_SPIKE gate warn: warns when current > 150% of previous (duplicate risk)
       - Source hash recorded in audit log (recomputable on dispute)
       - SchemaDriftDetector catches column changes even in partial files
-    residual_D: 4
-    residual_RPN_note: "8 × 3 × 4 = 96 — below threshold with row-count check"
-    open: true
-    action: >
-      Add row_count_check to ingestion pipeline: if current_rows < 0.7 * previous_rows,
-      raise IngestionWarning and block automated delivery.
-      Add expected_row_count_approx to client config for cross-check.
+    residual_D: 2
+    residual_RPN_note: "8 × 3 × 2 = 48 — closed by gate check in ai/review_gate.py"
+    open: false
 
   - id: FM-13
     name: Partial-month data when month-end shifts
@@ -240,16 +238,12 @@ failure_modes:
     O: 4  # Month-end extraction dates vary; December / 31-day months are systematic
     D: 6  # Without explicit period_end validation, extra-day inflation is invisible
     controls:
-      - DateColumnValidator records actual min/max dates in audit entry
-      - Comparison commentary includes period_days for both months
-      - Analyst review required for months where period_days differ by ≥2
-    residual_D: 3
-    residual_RPN_note: "6 × 4 × 3 = 72 — acceptable with period_days logged and analyst check"
-    open: true
-    action: >
-      Log period_days_current and period_days_previous in kpi_snapshot.
-      Gate warns (PERIOD_LENGTH_MISMATCH) if they differ by ≥2 days.
-      Analyst must acknowledge the warning before delivery.
+      - period_days computed in MonthlySnapshot.from_dataframe (max_date - min_date + 1)
+      - PERIOD_LENGTH_MISMATCH gate warns on ≥2 day difference (blocks on ≥7 days)
+      - period_days serialised in to_json() for audit trail
+    residual_D: 2
+    residual_RPN_note: "6 × 4 × 2 = 48 — closed by gate check in ai/review_gate.py"
+    open: false
 
   - id: FM-14
     name: API rate-limit or timeout beyond retry budget
@@ -292,14 +286,14 @@ summary:
     - FM-01  # 144 — number magnitude in prose (closed by reconciler for findings; prose remains)
     - FM-02  # 252 — fabricated root cause; mitigated structurally, process control still required
     - FM-06  # 135 — wrong DAX filter context, mitigated by golden tests (now with two-analyst signoff)
-    - FM-07  # pending DPA
+    - FM-07  # pending DPA gate (--confirm-dpa CLI flag)
     - FM-10  # 135 — prompt injection, mitigated by sanitizer + structural framing
-    - FM-12  # 96 — partial source file; mitigated by row-count check (pending implementation)
-    - FM-13  # 72 — partial-month period mismatch; mitigated by period_days logging (pending)
 
   closed_since_last_review:
     - FM-09  # was 252, now 56 — closed by KeyFinding structural generation + gate checks
     - FM-11  # opened and closed in same pass — mutation tests on the gate
+    - FM-12  # was 96, now 48 — ROW_COUNT_DROP/LOW/SPIKE gate checks in review_gate.py
+    - FM-13  # was 72, now 48 — PERIOD_LENGTH_MISMATCH gate check + period_days in snapshot
     - FM-14  # 6 — API rate-limit; covered by bounded retry + fallback gate
     - FM-15  # 20 — cost runaway; covered by bounded retry + CostTracker
 

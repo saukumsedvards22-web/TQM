@@ -71,3 +71,36 @@ def test_snapshot_from_dataframe():
     )
     assert snap.kpis["total_qty"] == pytest.approx(1000.0)
     assert "region" in snap.dimension_breakdowns
+
+
+def test_period_days_single_day():
+    df = pd.DataFrame({
+        "date": pd.to_datetime(["2024-03-01"] * 5),
+        "qty": [10, 20, 30, 40, 50],
+    })
+    snap = MonthlySnapshot.from_dataframe(df, "date", ["qty"], [], "2024-03")
+    assert snap.period_days == 1
+
+
+def test_period_days_full_month():
+    dates = pd.date_range("2024-03-01", "2024-03-31")
+    df = pd.DataFrame({"date": dates, "qty": [1.0] * len(dates)})
+    snap = MonthlySnapshot.from_dataframe(df, "date", ["qty"], [], "2024-03")
+    assert snap.period_days == 31
+
+
+def test_period_days_zero_when_no_date_col():
+    df = pd.DataFrame({"qty": [10, 20, 30]})
+    snap = MonthlySnapshot.from_dataframe(df, "missing_date", ["qty"], [], "2024-03")
+    assert snap.period_days == 0
+
+
+def test_period_days_in_to_json():
+    import json
+    df = pd.DataFrame({
+        "date": pd.date_range("2024-03-01", "2024-03-28"),
+        "qty": [1.0] * 28,
+    })
+    snap = MonthlySnapshot.from_dataframe(df, "date", ["qty"], [], "2024-03")
+    data = json.loads(snap.to_json())
+    assert data["period_days"] == 28

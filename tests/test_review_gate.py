@@ -124,3 +124,93 @@ def test_pending_file_created_on_block(tmp_path):
     assert not result.passed
     pending_files = list(tmp_path.glob("*.pending.json"))
     assert len(pending_files) == 1
+
+
+# ── Row-count guard (FM-12) ───────────────────────────────────────────
+
+def _snap_with_rows(period: str, qty: float, revenue: float, rows: int, days: int = 0) -> MonthlySnapshot:
+    return MonthlySnapshot(
+        period=period,
+        kpis={"total_qty": qty, "total_revenue": revenue},
+        row_count=rows,
+        period_days=days,
+    )
+
+
+def _comparison_with_rows(cur_rows: int, prev_rows: int):
+    cur = _snap_with_rows("2024-03", 1050, 95000, cur_rows)
+    prev = _snap_with_rows("2024-02", 1000, 90000, prev_rows)
+    return SnapshotComparison(current=cur, previous=prev)
+
+
+def test_row_count_drop_blocks():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="raise")
+    comp = _comparison_with_rows(cur_rows=600, prev_rows=1000)  # 60% — below 70%
+    with pytest.raises(Exception, match="ROW_COUNT_DROP"):
+        gate.check(_commentary(), comp, "Acme")
+
+
+def test_row_count_low_warns():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
+    comp = _comparison_with_rows(cur_rows=780, prev_rows=1000)  # 78% — warn band
+    result = gate.check(_commentary(), comp, "Acme")
+    assert any(f.code == "ROW_COUNT_LOW" and f.severity == "warn" for f in result.flags)
+    assert not any(f.code == "ROW_COUNT_DROP" for f in result.flags)
+
+
+def test_row_count_spike_warns():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
+    comp = _comparison_with_rows(cur_rows=1600, prev_rows=1000)  # 160% — spike
+    result = gate.check(_commentary(), comp, "Acme")
+    assert any(f.code == "ROW_COUNT_SPIKE" and f.severity == "warn" for f in result.flags)
+
+
+def test_row_count_normal_no_flag():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
+    comp = _comparison_with_rows(cur_rows=950, prev_rows=1000)  # 95% — fine
+    result = gate.check(_commentary(), comp, "Acme")
+    assert not any(f.code.startswith("ROW_COUNT") for f in result.flags)
+
+
+def test_row_count_zero_prev_skips():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
+    comp = _comparison_with_rows(cur_rows=500, prev_rows=0)
+    result = gate.check(_commentary(), comp, "Acme")
+    assert not any(f.code.startswith("ROW_COUNT") for f in result.flags)
+
+
+# ── Period-length guard (FM-13) ───────────────────────────────────────
+
+def _comparison_with_days(cur_days: int, prev_days: int):
+    cur = _snap_with_rows("2024-03", 1050, 95000, 1000, days=cur_days)
+    prev = _snap_with_rows("2024-02", 1000, 90000, 1000, days=prev_days)
+    return SnapshotComparison(current=cur, previous=prev)
+
+
+def test_period_mismatch_large_blocks():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="raise")
+    comp = _comparison_with_days(cur_days=15, prev_days=30)  # 15-day gap
+    with pytest.raises(Exception, match="PERIOD_LENGTH_MISMATCH"):
+        gate.check(_commentary(), comp, "Acme")
+
+
+def test_period_mismatch_small_warns():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
+    comp = _comparison_with_days(cur_days=28, prev_days=31)  # 3-day gap
+    result = gate.check(_commentary(), comp, "Acme")
+    assert any(f.code == "PERIOD_LENGTH_MISMATCH" and f.severity == "warn" for f in result.flags)
+    assert not any(f.code == "PERIOD_LENGTH_MISMATCH" and f.severity == "block" for f in result.flags)
+
+
+def test_period_mismatch_one_day_no_flag():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
+    comp = _comparison_with_days(cur_days=30, prev_days=31)  # 1-day diff — acceptable
+    result = gate.check(_commentary(), comp, "Acme")
+    assert not any(f.code == "PERIOD_LENGTH_MISMATCH" for f in result.flags)
+
+
+def test_period_mismatch_zero_days_skips():
+    gate = ReviewGate(static_fallback_pct=200.0, mode="pending_file", pending_dir=None)
+    comp = _comparison_with_days(cur_days=0, prev_days=0)  # not computed
+    result = gate.check(_commentary(), comp, "Acme")
+    assert not any(f.code == "PERIOD_LENGTH_MISMATCH" for f in result.flags)

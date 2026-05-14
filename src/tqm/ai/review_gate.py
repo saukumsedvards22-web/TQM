@@ -1,12 +1,15 @@
 """Human review gate — holds reports for approval before delivery.
 
 Checks (in order of severity):
-  1. Per-KPI volatility-based delta threshold (not fixed %)
-  2. Number reconciliation — every figure in prose matched against source data
-  3. Citation enforcement — root_cause_analysis must have ≥1 grounded claim
-  4. Direction conflict — sign of narrative must match sign of data
-  5. Round-number smell — possible column misclassification
-  6. No fallback commentary reaching delivery
+  1. Row-count guard (FM-12): block when current < 70% of previous rows
+  2. Period-length guard (FM-13): warn when coverage differs by ≥2 days
+  3. Per-KPI volatility-based delta threshold (not fixed %)
+  4. Structured KeyFinding validation (FM-09 family)
+  5. Number reconciliation — every figure in prose matched against source data
+  6. Citation enforcement — root_cause_analysis must have ≥1 grounded claim
+  7. Direction conflict — sign of narrative must match sign of data
+  8. Round-number smell — possible column misclassification
+  9. No fallback commentary reaching delivery
 
 Never email the CEO without passing through this gate.
 """
@@ -112,6 +115,8 @@ class ReviewGate:
     ) -> ReviewResult:
         """Run all checks. Returns ReviewResult — never raises."""
         flags: list[ReviewFlag] = []
+        flags += self._check_row_count(comparison)
+        flags += self._check_period_length(comparison)
         flags += self._check_delta_magnitudes(comparison)
         flags += self._check_key_findings(commentary, comparison)
         flags += self._check_number_reconciliation(commentary, comparison)
@@ -162,6 +167,86 @@ class ReviewGate:
     # ------------------------------------------------------------------
     # Checks
     # ------------------------------------------------------------------
+
+    def _check_row_count(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
+        """Block on truncated source data — current row count <70% of previous.
+
+        Closes FM-12. A partial SAP export can produce KPIs that look internally
+        consistent (revenue down 30%, qty down 30%, margin% flat) and pass every
+        downstream check. The only reliable signal is the row count itself.
+        """
+        cur = comparison.current.row_count
+        prev = comparison.previous.row_count
+        flags: list[ReviewFlag] = []
+
+        if prev <= 0 or cur <= 0:
+            return flags  # cannot judge without both sides
+
+        ratio = cur / prev
+        if ratio < 0.70:
+            flags.append(ReviewFlag(
+                severity="block",
+                code="ROW_COUNT_DROP",
+                message=(
+                    f"Current row count ({cur:,}) is {ratio:.0%} of previous ({prev:,}) — "
+                    "likely truncated source file"
+                ),
+                detail="Verify the export completed. Check file size against history before re-running.",
+            ))
+        elif ratio < 0.85:
+            flags.append(ReviewFlag(
+                severity="warn",
+                code="ROW_COUNT_LOW",
+                message=f"Current row count ({cur:,}) is {ratio:.0%} of previous ({prev:,})",
+                detail="May be normal seasonal drop; confirm with the client.",
+            ))
+        elif ratio > 1.5:
+            flags.append(ReviewFlag(
+                severity="warn",
+                code="ROW_COUNT_SPIKE",
+                message=f"Current row count ({cur:,}) is {ratio:.0%} of previous ({prev:,})",
+                detail="Possible duplicate ingestion or business-event spike — verify.",
+            ))
+        return flags
+
+    def _check_period_length(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
+        """Warn when the two periods cover materially different numbers of days.
+
+        Closes FM-13. A client who exports on the 30th gives you 30 days in
+        most months and 31 in December. An extra day inflates revenue by
+        ~3% — Claude will then confabulate a business reason. Flagging this
+        forces an analyst to acknowledge the period-length effect.
+        """
+        cur_days = comparison.current.period_days
+        prev_days = comparison.previous.period_days
+        if cur_days <= 0 or prev_days <= 0:
+            return []  # not computed (e.g. test fixture without dates)
+
+        diff = abs(cur_days - prev_days)
+        if diff >= 7:
+            return [ReviewFlag(
+                severity="block",
+                code="PERIOD_LENGTH_MISMATCH",
+                message=(
+                    f"Period coverage differs by {diff} days "
+                    f"(current={cur_days}, previous={prev_days})"
+                ),
+                detail="Likely partial-month extract. Resolve before comparison.",
+            )]
+        if diff >= 2:
+            return [ReviewFlag(
+                severity="warn",
+                code="PERIOD_LENGTH_MISMATCH",
+                message=(
+                    f"Period coverage differs by {diff} days "
+                    f"(current={cur_days}, previous={prev_days})"
+                ),
+                detail=(
+                    f"~{(diff / max(prev_days, 1)) * 100:.1f}% of the delta may be a length effect, "
+                    "not a business change. Analyst must acknowledge."
+                ),
+            )]
+        return []
 
     def _check_delta_magnitudes(self, comparison: SnapshotComparison) -> list[ReviewFlag]:
         """Block on KPI changes beyond per-KPI volatility threshold."""

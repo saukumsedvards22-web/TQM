@@ -172,12 +172,15 @@ Currently open high-RPN failure modes (must be mitigated before automated delive
 | FM-02 | 252 | Fabricated root cause | Human review every RCA for 6 months (process control) |
 | FM-01 | 144 | Magnitude mismatch in prose | Golden tests on first 3 reports |
 | FM-06 | 135 | DAX wrong filter context | Golden tests (two-analyst signoff required) before first deploy |
+| FM-10 | 135 | Prompt injection via free-text field | `PromptSanitizer` + `<client_data>` framing + system guard |
 
 Recently closed:
 
 | ID | Old RPN | New RPN | Closed by |
 |----|---------|---------|-----------|
 | FM-09 | 252 | 56 | Structured `KeyFinding(kpi_id, direction, magnitude_pct, context)` — LLM fills tuple, code renders prose. Five gate checks: `MALFORMED_FINDING`, `UNKNOWN_KPI`, `FINDING_DIRECTION_MISMATCH`, `FINDING_MAGNITUDE_MISMATCH`, `CONTEXT_KPI_LEAK`. |
+| FM-12 | 96 | 48 | `ROW_COUNT_DROP` gate blocks at <70% of previous rows; `ROW_COUNT_LOW` warns at 70–85%; `ROW_COUNT_SPIKE` warns at >150%. |
+| FM-13 | 72 | 48 | `period_days` computed from actual date coverage in `MonthlySnapshot`; `PERIOD_LENGTH_MISMATCH` gate warns on ≥2-day diff, blocks on ≥7. |
 
 ### On XMLA + Linux CI
 The XMLA deployment path (`powerbi/xmla.py`) requires:
