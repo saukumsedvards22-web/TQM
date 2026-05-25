@@ -51,10 +51,14 @@ class ClientCorrection:
             "client_name": self.client_name,
         }
 
+    _KNOWN_FIELDS: frozenset[str] = frozenset()  # populated after class body
+
     @classmethod
     def from_dict(cls, data: dict) -> "ClientCorrection":
-        known = frozenset(f.name for f in dataclasses.fields(cls))
-        return cls(**{k: v for k, v in data.items() if k in known})
+        return cls(**{k: v for k, v in data.items() if k in cls._KNOWN_FIELDS})
+
+
+ClientCorrection._KNOWN_FIELDS = frozenset(f.name for f in dataclasses.fields(ClientCorrection))
 
 
 class CorrectionsLog:

@@ -253,7 +253,10 @@ class AuditLog:
         return self.log_dir / f"{safe}_{year}.jsonl"
 
     def _append(self, client_name: str, period: str, entry: AuditEntry) -> None:
+        import os
         year = period[:4] if len(period) >= 4 else datetime.now().strftime("%Y")
         path = self._path(client_name, year)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())

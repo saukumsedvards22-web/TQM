@@ -70,6 +70,16 @@ _TABLE_REF = re.compile(r"'?([A-Za-z_][A-Za-z0-9_\s]*)'?\[([A-Za-z_][A-Za-z0-9_\
 _MEASURE_REF = re.compile(r"(?<!')\[([A-Za-z_][A-Za-z0-9_ %#]+)\]")
 _FORMAT_STRINGS_NUMERIC = re.compile(r"^[#0,.\-+ ]*[€$%]?$")
 _BLANK_EXPRESSION = re.compile(r"^\s*(BLANK\(\)|\"\"|\s*)$", re.I)
+_DAX_STRING_LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def _strip_string_literals(expr: str) -> str:
+    """Replace DAX string literals with empty strings before structural checks.
+
+    Brackets and parentheses inside string literals must not be counted as
+    structural tokens — "Price [EUR]" has a bracket that isn't a column ref.
+    """
+    return _DAX_STRING_LITERAL.sub('""', expr)
 
 
 class DAXValidator:
@@ -106,6 +116,9 @@ class DAXValidator:
         issues: list[DAXIssue] = []
         expr = measure.expression
         name = measure.name
+        # Strip string literals before structural checks so brackets/parens
+        # inside "quoted strings" aren't counted as column/measure references
+        structural_expr = _strip_string_literals(expr)
 
         # 1. Blank / trivially wrong expressions
         if _BLANK_EXPRESSION.match(expr):
@@ -115,9 +128,9 @@ class DAXValidator:
             ))
             return issues  # No point running further checks
 
-        # 2. Balanced parentheses
+        # 2. Balanced parentheses (check on string-stripped expression)
         depth = 0
-        for ch in expr:
+        for ch in structural_expr:
             if ch == "(":
                 depth += 1
             elif ch == ")":
@@ -132,8 +145,8 @@ class DAXValidator:
                 snippet=expr[:100],
             ))
 
-        # 3. Balanced brackets
-        brackets = expr.count("[") - expr.count("]")
+        # 3. Balanced brackets (check on string-stripped expression)
+        brackets = structural_expr.count("[") - structural_expr.count("]")
         if brackets != 0:
             issues.append(DAXIssue(
                 severity="error", code="UNBALANCED_BRACKETS",

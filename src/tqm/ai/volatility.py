@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -122,9 +124,23 @@ class VolatilityTracker:
             updated.append(new_record)
 
         path = self._path(client_name)
-        with path.open("w", encoding="utf-8") as fh:
-            for r in updated:
-                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        # Atomic write: write to a temp file in the same directory, then rename.
+        # Concurrent record() calls for the same client could otherwise truncate
+        # and overwrite each other's data (open("w") truncates immediately).
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                for r in updated:
+                    fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)  # atomic on POSIX
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
         action = "Updated" if replaced else "Recorded"
         log.debug("%s %d KPI deltas for %s / %s", action, len(kpi_deltas), client_name, period)

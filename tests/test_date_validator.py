@@ -67,3 +67,24 @@ def test_pick_best_column_no_candidates():
     col, result = DateColumnValidator().pick_best_date_column(df, [])
     assert col is None
     assert result is None
+
+
+# ── expected_period validation ─────────────────────────────────────────────────
+
+import pytest
+
+@pytest.mark.parametrize("bad_period", [
+    "2024",          # year only
+    "2024-13",       # month out of range
+    "03-2024",       # month-first
+    "2024/03",       # wrong separator
+    "not-a-period",  # garbage
+])
+def test_malformed_expected_period_raises(bad_period):
+    """Malformed expected_period must raise ValueError, not crash mid-validation."""
+    df = pd.DataFrame({
+        "date": pd.date_range("2024-03-01", periods=10, freq="D"),
+        "revenue": range(10),
+    })
+    with pytest.raises(ValueError, match="expected_period"):
+        DateColumnValidator(expected_period=bad_period).validate(df, "date")

@@ -96,3 +96,20 @@ def test_clean_measure_set_passes():
     ])
     result = DAXValidator().validate_set(ms)
     assert result.passed
+
+
+def test_bracket_in_string_literal_not_flagged():
+    """Brackets inside string literals must not trigger UNBALANCED_BRACKETS."""
+    # "Price [EUR]" has [ and ] inside a string — should NOT be a bracket error
+    m = _measure("Label", 'SUM(sales[amount]) & " [EUR]"')
+    issues = DAXValidator().validate_measure(m)
+    assert not any(i.code == "UNBALANCED_BRACKETS" for i in issues), (
+        "Bracket inside string literal falsely flagged as UNBALANCED_BRACKETS"
+    )
+
+
+def test_genuinely_unbalanced_bracket_still_caught():
+    """Truly unbalanced brackets (not in strings) must still be flagged."""
+    m = _measure("Bad", "SUM(sales[amount)")  # ] missing
+    issues = DAXValidator().validate_measure(m)
+    assert any(i.code == "UNBALANCED_BRACKETS" for i in issues)

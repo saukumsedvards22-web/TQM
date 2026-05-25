@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 from dataclasses import dataclass, field
 from functools import cached_property
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,7 +32,6 @@ class MonthlySnapshot:
         dimension_cols: list[str],
         period: str,
     ) -> "MonthlySnapshot":
-        import math
         kpis: dict[str, float] = {}
         for col in measure_cols:
             if col not in df.columns:

@@ -269,3 +269,52 @@ def test_rolling_window_one_dirty_month_not_eligible(tmp_path):
     eligible, results = checker.rolling_window("Acme", anchor_date=anchor)
     assert not eligible
     assert sum(1 for r in results if not r.is_clean) == 1
+
+
+# ── ClientCorrection.from_dict ────────────────────────────────────────────────
+
+def test_client_correction_from_dict_ignores_unknown_fields(tmp_path):
+    """from_dict() must tolerate extra fields from future log versions."""
+    data = {
+        "report_id": "r1", "logged_at": "2024-05-01T10:00:00Z",
+        "logged_by": "alice", "field": "x", "claimed_value": 1.0,
+        "actual_value": 2.0, "source_of_truth": "sheet.xlsx",
+        "severity": "material", "client_name": "Acme",
+        "future_field": "should be ignored",   # unknown field
+        "another_new_key": 42,
+    }
+    c = ClientCorrection.from_dict(data)
+    assert c.report_id == "r1"
+    assert c.client_name == "Acme"
+
+
+def test_client_correction_from_dict_handles_missing_optional_field(tmp_path):
+    """from_dict() must apply default for client_name if missing from old entries."""
+    data = {
+        "report_id": "r2", "logged_at": "2024-05-01T10:00:00Z",
+        "logged_by": "alice", "field": "x", "claimed_value": 1.0,
+        "actual_value": 2.0, "source_of_truth": "sheet.xlsx",
+        "severity": "material",
+        # client_name intentionally absent — old log entry
+    }
+    c = ClientCorrection.from_dict(data)
+    assert c.client_name == ""  # default from dataclass
+
+
+def test_corrections_log_for_client_survives_extra_fields_in_jsonl(tmp_path):
+    """CorrectionsLog.for_client() must not silently drop records with extra fields."""
+    import json
+    log_file = tmp_path / "acme_corrections.jsonl"
+    entry = {
+        "report_id": "r3", "logged_at": "2024-06-01T00:00:00Z",
+        "logged_by": "bob", "field": "total_revenue", "claimed_value": 100.0,
+        "actual_value": 95.0, "source_of_truth": "erp.xlsx",
+        "severity": "material", "client_name": "Acme",
+        "added_in_v2": "some new metadata",  # future field in the JSONL
+    }
+    log_file.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+
+    log = CorrectionsLog(log_dir=tmp_path)
+    loaded = log.for_client("Acme")
+    assert len(loaded) == 1, "Extra field caused record to be silently dropped"
+    assert loaded[0].report_id == "r3"

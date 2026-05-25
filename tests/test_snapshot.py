@@ -104,3 +104,24 @@ def test_period_days_in_to_json():
     snap = MonthlySnapshot.from_dataframe(df, "date", ["qty"], [], "2024-03")
     data = json.loads(snap.to_json())
     assert data["period_days"] == 28
+
+
+def test_all_null_measure_column_skipped():
+    """A 100% null column must not produce NaN KPIs that bypass gate checks."""
+    df = pd.DataFrame({
+        "date": pd.date_range("2024-03-01", periods=5),
+        "revenue": [100.0, 200.0, 150.0, 180.0, 120.0],
+        "bad_col": [None, None, None, None, None],  # 100% null
+    })
+    snap = MonthlySnapshot.from_dataframe(df, "date", ["revenue", "bad_col"], [], "2024-03")
+    # bad_col must be absent from kpis — no NaN values
+    kpi_keys = list(snap.kpis.keys())
+    assert not any("bad_col" in k for k in kpi_keys), (
+        f"All-null column produced KPI entries: {[k for k in kpi_keys if 'bad_col' in k]}"
+    )
+    # Revenue column must still be present
+    assert "total_revenue" in snap.kpis
+    import math
+    assert not any(math.isnan(v) for v in snap.kpis.values()), (
+        "NaN found in kpis — would silently bypass all gate comparisons"
+    )
