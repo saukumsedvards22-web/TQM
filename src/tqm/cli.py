@@ -30,22 +30,22 @@ load_dotenv()
 console = Console()
 
 
-def _parse_period(filepath: str) -> str:
+def _parse_period(filepath: str) -> str | None:
     """Extract YYYY-MM period from a filename stem.
 
     Accepts separators _ or -:  sales_2024_03.csv → "2024-03"
                                  acme-2024-03-data.xlsx → "2024-03"
                                  2024_03.csv → "2024-03"
 
-    Falls back to the raw stem if no YYYY-MM pattern is found so the pipeline
-    still runs — period will just be non-standard and the clean-month checker
-    will not find it in its rolling window.
+    Returns None if no YYYY-MM pattern is found; the caller must handle this
+    before passing the period anywhere — storing "sales_data" as a period
+    would silently corrupt audit log history and clean-month rolling windows.
     """
     stem = Path(filepath).stem
     m = re.search(r'(\d{4})[_\-](\d{2})(?:[_\-]|$)', stem)
     if m:
         return f"{m.group(1)}-{m.group(2)}"
-    return stem
+    return None
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -371,6 +371,15 @@ def report(
     console.print("[bold]Step 4/5:[/bold] Generating AI commentary…")
     cur_period = _parse_period(current_file)
     prev_period = _parse_period(previous_file)
+    if cur_period is None or prev_period is None:
+        bad = current_file if cur_period is None else previous_file
+        console.print(
+            f"[red bold]PERIOD UNKNOWN — aborting[/red bold]\n"
+            f"Cannot extract a YYYY-MM period from: {bad}\n"
+            "Rename the file to include a year and month, e.g. acme_2024_03.xlsx, "
+            "or set [bold]expected_period[/bold] explicitly in your config."
+        )
+        sys.exit(1)
     console.print(f"[dim]Periods: {prev_period} → {cur_period}[/dim]")
 
     snap_cur = MonthlySnapshot.from_dataframe(

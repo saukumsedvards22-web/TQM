@@ -231,3 +231,35 @@ def test_kpi_deltas_cached_property_consistent():
     second = comp.kpi_deltas
     assert first is second  # same object — cached, not recomputed
     assert first["total_revenue"]["pct"] == pytest.approx(11.11, rel=0.01)
+
+
+def test_row_count_mutation_visible_after_kpi_deltas_cached():
+    """Gate reads row_count directly from snapshot, not from cached kpi_deltas.
+
+    If _check_row_count() ever started reading from kpi_deltas instead of
+    comparison.current.row_count, this test would catch the regression:
+    the cache is populated first, then the mutation is applied, and the
+    gate must still fire.
+    """
+    from tqm.ai.review_gate import ReviewGate
+
+    snap_cur = MonthlySnapshot(period="2024-03", kpis={"total_revenue": 1000.0}, row_count=1000, period_days=30)
+    snap_prev = MonthlySnapshot(period="2024-02", kpis={"total_revenue": 1000.0}, row_count=1000, period_days=29)
+    comp = SnapshotComparison(current=snap_cur, previous=snap_prev)
+
+    # Warm the cache — kpi_deltas is now stored on the instance
+    _ = comp.kpi_deltas
+    assert comp.kpi_deltas is _  # confirms cache is hot
+
+    # Now mutate row_count directly — simulates what ComparisonMutation does
+    comp.current.row_count = 500  # 50% of 1000 → below the 70% DROP threshold
+
+    commentary = _make_commentary(comp)
+    gate = ReviewGate(static_fallback_pct=50.0, mode="pending_file", pending_dir=None)
+    result = gate.check(commentary, comp, "Acme")
+
+    block_codes = {f.code for f in result.flags if f.severity == "block"}
+    assert "ROW_COUNT_DROP" in block_codes, (
+        "_check_row_count reads from kpi_deltas (stale cache) instead of "
+        "comparison.current.row_count — mutation invisible to gate"
+    )
