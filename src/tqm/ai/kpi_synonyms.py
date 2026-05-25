@@ -24,6 +24,7 @@ catch the case where Claude swaps one KPI's name for another's synonym.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -124,8 +125,6 @@ class SynonymTable:
         ctx_lower = context.lower()
         leaks: set[str] = set()
         for tok in other_owned:
-            # Word-boundary match — "cost" must not match "costing", "costume"
-            import re
             if re.search(rf"\b{re.escape(tok)}\b", ctx_lower):
                 leaks.add(tok)
         return leaks

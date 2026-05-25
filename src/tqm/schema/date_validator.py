@@ -138,7 +138,16 @@ class DateColumnValidator:
 
         # 4. Expected period coverage
         if self.expected_period:
-            year, month = map(int, self.expected_period.split("-"))
+            parts = self.expected_period.split("-")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                raise ValueError(
+                    f"expected_period must be YYYY-MM, got {self.expected_period!r}"
+                )
+            year, month = int(parts[0]), int(parts[1])
+            if not (1 <= month <= 12):
+                raise ValueError(
+                    f"expected_period month out of range 1–12: {self.expected_period!r}"
+                )
             period_start = pd.Timestamp(year, month, 1)
             period_end = period_start + pd.offsets.MonthEnd(0)
             in_period = series.between(period_start, period_end).sum()

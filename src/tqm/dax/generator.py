@@ -82,6 +82,8 @@ class DAXGenerator:
             messages=[{"role": "user", "content": user_content}],
         )
 
+        if not response.content:
+            raise ValueError("API returned empty content block — cannot generate DAX measures")
         raw = response.content[0].text  # type: ignore[union-attr]
         measures = self._parse_response(raw, model.fact.name)
 

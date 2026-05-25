@@ -250,6 +250,9 @@ class AIAnalyst:
             log.error("All retries exhausted for AI commentary: %s", exc)
             return self._fallback_commentary(comparison)
 
+        if not response.content:
+            log.error("API returned empty content block — falling back to stub commentary")
+            return self._fallback_commentary(comparison)
         raw = response.content[0].text  # type: ignore[union-attr]
         log.debug("Cache read tokens: %s", getattr(response.usage, "cache_read_input_tokens", "n/a"))
 

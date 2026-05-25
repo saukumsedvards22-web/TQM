@@ -14,7 +14,14 @@ from ..ai.snapshot import SnapshotComparison
 
 log = logging.getLogger(__name__)
 
+# Templates live at project-root/templates. Resolve relative to this file:
+# src/tqm/reporting/renderer.py → ../../.. → src/ → .. → project root
 _TEMPLATES_DIR = Path(__file__).parent.parent.parent.parent / "templates"
+if not _TEMPLATES_DIR.is_dir():
+    raise RuntimeError(
+        f"Templates directory not found: {_TEMPLATES_DIR}\n"
+        "Expected layout: project_root/templates/report.html.j2"
+    )
 
 
 @dataclass

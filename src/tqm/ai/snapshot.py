@@ -28,12 +28,21 @@ class MonthlySnapshot:
         dimension_cols: list[str],
         period: str,
     ) -> "MonthlySnapshot":
+        import math
         kpis: dict[str, float] = {}
         for col in measure_cols:
-            if col in df.columns:
-                kpis[f"total_{col}"] = float(df[col].sum())
-                kpis[f"avg_{col}"] = float(df[col].mean())
-                kpis[f"max_{col}"] = float(df[col].max())
+            if col not in df.columns:
+                continue
+            total = float(df[col].sum())
+            avg = float(df[col].mean())
+            mx = float(df[col].max())
+            # Skip columns that are 100% null — NaN silently bypasses all gate comparisons
+            if math.isnan(avg):
+                log.warning("Column %r is all-null; skipping KPI aggregates", col)
+                continue
+            kpis[f"total_{col}"] = total
+            kpis[f"avg_{col}"] = avg
+            kpis[f"max_{col}"] = mx if not math.isnan(mx) else 0.0
 
         breakdowns: dict[str, dict[str, float]] = {}
         for dim in dimension_cols:

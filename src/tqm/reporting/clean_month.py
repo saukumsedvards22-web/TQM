@@ -11,6 +11,7 @@ when downgrading or refusing a downgrade.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
@@ -50,6 +51,11 @@ class ClientCorrection:
             "client_name": self.client_name,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "ClientCorrection":
+        known = frozenset(f.name for f in dataclasses.fields(cls))
+        return cls(**{k: v for k, v in data.items() if k in known})
+
 
 class CorrectionsLog:
     """Append-only log of client-disputed numbers."""
@@ -80,7 +86,7 @@ class CorrectionsLog:
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
                 data = json.loads(line)
-                corrections.append(ClientCorrection(**data))
+                corrections.append(ClientCorrection.from_dict(data))
             except (json.JSONDecodeError, TypeError) as exc:
                 log.warning("Skipping malformed correction line: %s", exc)
         return corrections
